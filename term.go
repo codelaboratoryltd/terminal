@@ -79,6 +79,7 @@ type Terminal struct {
 	newLineMode        bool // new line mode or line feed mode
 	bracketedPasteMode bool
 	blinking           bool
+	underlined         bool
 }
 
 // Cursor is used for displaying a specific cursor.
