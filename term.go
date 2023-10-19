@@ -80,6 +80,7 @@ type Terminal struct {
 	bracketedPasteMode bool
 	state              *parseState
 	blinking           bool
+	underlined         bool
 }
 
 // Cursor is used for displaying a specific cursor.
