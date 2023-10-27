@@ -116,13 +116,7 @@ func (t *Terminal) handleOutput(buf []byte) {
 		}
 
 		if t.state.printing {
-			t.printData = append(t.printData, buf[:size]...)
-			if bytes.HasSuffix(t.printData, []byte{asciiEscape, '[', '4', 'i'}) {
-				// Handle the end of printing
-				t.printData = t.printData[:len(t.printData)-4]
-				escapePrinterMode(t, "4")
-				t.state.esc = noEscape
-			}
+			t.parsePrinting(buf, size)
 			continue
 		}
 		if r == asciiEscape {
@@ -130,70 +124,25 @@ func (t *Terminal) handleOutput(buf []byte) {
 			continue
 		}
 		if t.state.esc == i-1 {
-			switch r {
-			case '[':
+			if cont := t.parseEscState(r); cont {
 				continue
-			case '_':
-				t.state.apc = true
-				t.state.code = ""
-			case '\\':
-				if t.state.osc {
-					t.handleOSC(t.state.code)
-				} else if t.state.apc {
-					t.handleAPC(t.state.code)
-				}
-				t.state.code = ""
-				t.state.osc = false
-				t.state.apc = false
-			case ']':
-				t.state.osc = true
-			case '(', ')':
-				t.state.vt100 = r
-			case '7':
-				t.savedRow = t.cursorRow
-				t.savedCol = t.cursorCol
-			case '8':
-				t.cursorRow = t.savedRow
-				t.cursorCol = t.savedCol
-			case 'D':
-				t.scrollDown()
-			case 'M':
-				t.scrollUp()
-			case '=', '>':
 			}
 			t.state.esc = noEscape
 			continue
 		}
 		if t.state.apc {
-			if r == 0 {
-				t.handleAPC(t.state.code)
-				t.state.code = ""
-				t.state.apc = false
-			} else {
-				t.state.code += string(r)
-			}
+			t.parseAPC(r)
 			continue
 		}
 		if t.state.osc {
-			if r == asciiBell || r == 0 {
-				t.handleOSC(t.state.code)
-				t.state.code = ""
-				t.state.osc = false
-			} else {
-				t.state.code += string(r)
-			}
+			t.parseOSC(r)
 			continue
 		} else if t.state.vt100 != 0 {
 			t.handleVT100(string([]rune{t.state.vt100, r}))
 			t.state.vt100 = 0
 			continue
 		} else if t.state.esc != noEscape {
-			t.state.code += string(r)
-			if (r < '0' || r > '9') && r != ';' && r != '=' && r != '?' && r != '>' {
-				t.handleEscape(t.state.code)
-				t.state.code = ""
-				t.state.esc = noEscape
-			}
+			t.parseEscape(r)
 			continue
 		}
 
@@ -216,6 +165,45 @@ func (t *Terminal) handleOutput(buf []byte) {
 	// record progress for next chunk of buffer
 	if t.state.esc != noEscape {
 		t.state.esc = -1
+	}
+}
+
+func (t *Terminal) parseEscape(r rune) {
+	t.state.code += string(r)
+	if (r < '0' || r > '9') && r != ';' && r != '=' && r != '?' && r != '>' {
+		t.handleEscape(t.state.code)
+		t.state.code = ""
+		t.state.esc = noEscape
+	}
+}
+
+func (t *Terminal) parseAPC(r rune) {
+	if r == 0 {
+		t.handleAPC(t.state.code)
+		t.state.code = ""
+		t.state.apc = false
+	} else {
+		t.state.code += string(r)
+	}
+}
+
+func (t *Terminal) parseOSC(r rune) {
+	if r == asciiBell || r == 0 {
+		t.handleOSC(t.state.code)
+		t.state.code = ""
+		t.state.osc = false
+	} else {
+		t.state.code += string(r)
+	}
+}
+
+func (t *Terminal) parsePrinting(buf []byte, size int) {
+	t.printData = append(t.printData, buf[:size]...)
+	if bytes.HasSuffix(t.printData, []byte{asciiEscape, '[', '4', 'i'}) {
+		// Handle the end of printing
+		t.printData = t.printData[:len(t.printData)-4]
+		escapePrinterMode(t, "4")
+		t.state.esc = noEscape
 	}
 }
 

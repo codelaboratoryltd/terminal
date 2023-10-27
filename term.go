@@ -521,3 +521,38 @@ func (t *Terminal) Dragged(d *fyne.DragEvent) {
 func (t *Terminal) DragEnd() {
 	t.selecting = false
 }
+
+func (t *Terminal) parseEscState(r rune) (shouldContinue bool) {
+	switch r {
+	case '[':
+		return true
+	case '_':
+		t.state.apc = true
+		t.state.code = ""
+	case '\\':
+		if t.state.osc {
+			t.handleOSC(t.state.code)
+		} else if t.state.apc {
+			t.handleAPC(t.state.code)
+		}
+		t.state.code = ""
+		t.state.osc = false
+		t.state.apc = false
+	case ']':
+		t.state.osc = true
+	case '(', ')':
+		t.state.vt100 = r
+	case '7':
+		t.savedRow = t.cursorRow
+		t.savedCol = t.cursorCol
+	case '8':
+		t.cursorRow = t.savedRow
+		t.cursorCol = t.savedCol
+	case 'D':
+		t.scrollDown()
+	case 'M':
+		t.scrollUp()
+	case '=', '>':
+	}
+	return false
+}
