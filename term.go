@@ -17,10 +17,6 @@ import (
 	widget2 "github.com/fyne-io/terminal/internal/widget"
 )
 
-const (
-	bufLen = 4069
-)
-
 // Config is the state of a terminal, updated upon certain actions or commands.
 // Use Terminal.OnConfigure hook to register for changes.
 type Config struct {
@@ -78,25 +74,6 @@ type Terminal struct {
 	}
 	newLineMode        bool // new line mode or line feed mode
 	bracketedPasteMode bool
-	blinking           bool
-	underlined         bool
-
-	state     *parseState
-	printData []byte
-	printer   Printer
-}
-
-// Printer is used for spooling print data when its received.
-type Printer interface {
-	Print([]byte)
-}
-
-// PrinterFunc is a helper function to enable easy implementation of printers.
-type PrinterFunc func([]byte)
-
-// Print calls the PrinterFunc.
-func (p PrinterFunc) Print(d []byte) {
-	p(d)
 }
 
 // Cursor is used for displaying a specific cursor.
@@ -287,73 +264,26 @@ func (t *Terminal) guessCellSize() fyne.Size {
 	return fyne.NewSize(float32(math.Round(float64(min.Width))), float32(math.Round(float64(min.Height))))
 }
 
-// run starts the main loop for handling terminal output, blinking, and refreshing.
-// It reads terminal output asynchronously, processes it, and toggles blinking every
-// blinkingInterval duration.
-// The function returns when the terminal is closed.
 func (t *Terminal) run() {
-	ch := make(chan []byte)
-	ticker := time.NewTicker(blinkingInterval)
-	blinking := false
-	go t.readOutAsync(ch)
-
-	for {
-		select {
-		case b, ok := <-ch:
-			if !ok {
-				// we've been closed
-				return
-			}
-			t.handleOutput(b)
-			if len(b) < bufLen {
-				t.Refresh()
-			}
-		case <-ticker.C:
-			blinking = !blinking
-			t.runBlink(blinking)
-		}
-	}
-}
-
-// runBlink manages the blinking effect for cells in the terminal content.
-// It toggles the blinking state for blinking cells and refreshes the content as needed.
-func (t *Terminal) runBlink(blinking bool) {
-	for rowNo, r := range t.content.Rows {
-		for colNo, c := range r.Cells {
-			s, ok := c.Style.(*widget2.TermTextGridStyle)
-			if ok {
-				s.Blink = blinking
-			}
-
-			_, _ = rowNo, colNo
-		}
-	}
-
-	// redraw the cells we just flipped
-	t.content.Refresh()
-}
-
-// readOutAsync reads terminal output asynchronously and sends it to the provided channel.
-// It handles  when the terminal is closed or encounters an error. The chanel is closed on returning.
-func (t *Terminal) readOutAsync(ch chan []byte) {
+	bufLen := 4069
 	buf := make([]byte, bufLen)
 	for {
 		num, err := t.out.Read(buf)
 		if err != nil {
 			// this is the pre-go 1.13 way to check for the read failing (terminal closed)
 			if err.Error() == "EOF" {
-				close(ch)
 				break // term exit on macOS
 			} else if err, ok := err.(*os.PathError); ok && err.Err.Error() == "input/output error" {
-				close(ch)
 				break // broken pipe, terminal exit
 			}
 
 			fyne.LogError("pty read error", err)
 		}
-		cp := make([]byte, num)
-		copy(cp, buf[:num])
-		ch <- cp
+
+		t.handleOutput(buf[:num])
+		if num < bufLen {
+			t.Refresh()
+		}
 	}
 }
 
@@ -520,39 +450,4 @@ func (t *Terminal) Dragged(d *fyne.DragEvent) {
 // DragEnd is called by fyne when the left mouse is released after a Drag event.
 func (t *Terminal) DragEnd() {
 	t.selecting = false
-}
-
-func (t *Terminal) parseEscState(r rune) (shouldContinue bool) {
-	switch r {
-	case '[':
-		return true
-	case '_':
-		t.state.apc = true
-		t.state.code = ""
-	case '\\':
-		if t.state.osc {
-			t.handleOSC(t.state.code)
-		} else if t.state.apc {
-			t.handleAPC(t.state.code)
-		}
-		t.state.code = ""
-		t.state.osc = false
-		t.state.apc = false
-	case ']':
-		t.state.osc = true
-	case '(', ')':
-		t.state.vt100 = r
-	case '7':
-		t.savedRow = t.cursorRow
-		t.savedCol = t.cursorCol
-	case '8':
-		t.cursorRow = t.savedRow
-		t.cursorCol = t.savedCol
-	case 'D':
-		t.scrollDown()
-	case 'M':
-		t.scrollUp()
-	case '=', '>':
-	}
-	return false
 }

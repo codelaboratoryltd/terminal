@@ -1,12 +1,9 @@
 package terminal
 
 import (
-	"bytes"
 	"time"
-	"unicode/utf8"
 
 	"fyne.io/fyne/v2/widget"
-	widget2 "github.com/fyne-io/terminal/internal/widget"
 )
 
 const (
@@ -16,8 +13,6 @@ const (
 
 	noEscape = 5000
 	tabWidth = 8
-
-	blinkingInterval = 500 * time.Millisecond
 )
 
 var charSetMap = map[charSet]func(rune) rune{
@@ -84,65 +79,80 @@ var decSpecialGraphics = map[rune]rune{
 	'~': '·', // centered dot
 }
 
+var previous *parseState
+
 type parseState struct {
-	code     string
-	esc      int
-	osc      bool
-	vt100    rune
-	apc      bool
-	printing bool
+	code  string
+	esc   int
+	osc   bool
+	vt100 rune
 }
 
 func (t *Terminal) handleOutput(buf []byte) {
 	if t.hasSelectedText() {
 		t.clearSelectedText()
 	}
-	if t.state == nil {
-		t.state = &parseState{
-			esc: noEscape,
-		}
+	state := &parseState{}
+	if previous != nil {
+		state = previous
+		previous = nil
+	} else {
+		state.esc = noEscape
 	}
-	var (
-		size int
-		r    rune
-		i    = -1
-	)
-	for {
-		i++
-		buf = buf[size:]
-		r, size = utf8.DecodeRune(buf)
-		if size == 0 {
-			break
-		}
 
-		if t.state.printing {
-			t.parsePrinting(buf, size)
-			continue
-		}
+	for i, r := range []rune(string(buf)) {
 		if r == asciiEscape {
-			t.state.esc = i
+			state.esc = i
 			continue
 		}
-		if t.state.esc == i-1 {
-			if cont := t.parseEscState(r); cont {
+		if state.esc == i-1 {
+			if r == '[' {
 				continue
 			}
-			t.state.esc = noEscape
+			switch r {
+			case '\\':
+				t.handleOSC(state.code)
+				state.code = ""
+				state.osc = false
+			case ']':
+				state.osc = true
+			case '(', ')':
+				state.vt100 = r
+			case '7':
+				t.savedRow = t.cursorRow
+				t.savedCol = t.cursorCol
+			case '8':
+				t.cursorRow = t.savedRow
+				t.cursorCol = t.savedCol
+			case 'D':
+				t.scrollDown()
+			case 'M':
+				t.scrollUp()
+			case '=', '>':
+			}
+			state.esc = noEscape
 			continue
 		}
-		if t.state.apc {
-			t.parseAPC(r)
+		if state.osc {
+			if r == asciiBell || r == 0 {
+				t.handleOSC(state.code)
+				state.code = ""
+				state.osc = false
+			} else {
+				state.code += string(r)
+			}
 			continue
-		}
-		if t.state.osc {
-			t.parseOSC(r)
+		} else if state.vt100 != 0 {
+			t.handleVT100(string([]rune{state.vt100, r}))
+			state.vt100 = 0
 			continue
-		} else if t.state.vt100 != 0 {
-			t.handleVT100(string([]rune{t.state.vt100, r}))
-			t.state.vt100 = 0
-			continue
-		} else if t.state.esc != noEscape {
-			t.parseEscape(r)
+		} else if state.esc != noEscape {
+			state.code += string(r)
+			if (r < '0' || r > '9') && r != ';' && r != '=' && r != '?' && r != '>' {
+				t.handleEscape(state.code)
+				state.code = ""
+				state.esc = noEscape
+			}
 			continue
 		}
 
@@ -163,47 +173,9 @@ func (t *Terminal) handleOutput(buf []byte) {
 	}
 
 	// record progress for next chunk of buffer
-	if t.state.esc != noEscape {
-		t.state.esc = -1
-	}
-}
-
-func (t *Terminal) parseEscape(r rune) {
-	t.state.code += string(r)
-	if (r < '0' || r > '9') && r != ';' && r != '=' && r != '?' && r != '>' {
-		t.handleEscape(t.state.code)
-		t.state.code = ""
-		t.state.esc = noEscape
-	}
-}
-
-func (t *Terminal) parseAPC(r rune) {
-	if r == 0 {
-		t.handleAPC(t.state.code)
-		t.state.code = ""
-		t.state.apc = false
-	} else {
-		t.state.code += string(r)
-	}
-}
-
-func (t *Terminal) parseOSC(r rune) {
-	if r == asciiBell || r == 0 {
-		t.handleOSC(t.state.code)
-		t.state.code = ""
-		t.state.osc = false
-	} else {
-		t.state.code += string(r)
-	}
-}
-
-func (t *Terminal) parsePrinting(buf []byte, size int) {
-	t.printData = append(t.printData, buf[:size]...)
-	if bytes.HasSuffix(t.printData, []byte{asciiEscape, '[', '4', 'i'}) {
-		// Handle the end of printing
-		t.printData = t.printData[:len(t.printData)-4]
-		escapePrinterMode(t, "4")
-		t.state.esc = noEscape
+	if state.esc != noEscape {
+		state.esc = -1 - (len(state.code))
+		previous = state
 	}
 }
 
@@ -215,7 +187,7 @@ func (t *Terminal) handleOutputChar(r rune) {
 		t.content.Rows = append(t.content.Rows, widget.TextGridRow{})
 	}
 
-	cellStyle := widget2.NewTermTextGridStyle(t.currentFG, t.currentBG, t.highlightBitMask, t.blinking, t.bold, t.underlined)
+	cellStyle := &widget.CustomTextGridStyle{FGColor: t.currentFG, BGColor: t.currentBG}
 	for len(t.content.Rows[t.cursorRow].Cells)-1 < t.cursorCol {
 		newCell := widget.TextGridCell{
 			Rune:  ' ',
