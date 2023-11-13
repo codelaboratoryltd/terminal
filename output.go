@@ -188,6 +188,7 @@ func (t *Terminal) handleOutputChar(r rune) {
 	}
 
 	cellStyle := &widget.CustomTextGridStyle{FGColor: t.currentFG, BGColor: t.currentBG}
+	cellStyle = &widget.CustomTextGridStyle{FGColor: t.currentFG, BGColor: t.currentBG}
 	for len(t.content.Rows[t.cursorRow].Cells)-1 < t.cursorCol {
 		newCell := widget.TextGridCell{
 			Rune:  ' ',
@@ -195,7 +196,6 @@ func (t *Terminal) handleOutputChar(r rune) {
 		}
 		t.content.Rows[t.cursorRow].Cells = append(t.content.Rows[t.cursorRow].Cells, newCell)
 	}
-
 	t.content.SetCell(t.cursorRow, t.cursorCol, widget.TextGridCell{Rune: r, Style: cellStyle})
 	t.cursorCol++
 }
