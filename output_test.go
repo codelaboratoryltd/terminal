@@ -8,14 +8,23 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestTerminal_Backspace(t *testing.T) {
-	term := New()
-	term.Resize(fyne.NewSize(50, 50))
-	term.handleOutput([]byte("Hi"))
-	assert.Equal(t, "Hi", term.content.Text())
+func TestTerminalBackspace(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"Hi", "Hi"},
+		{"Hello\b", "Hell"},
+		{"Hello\bË", "HellË"},
+		{"Hello\bÜ", "HellÜ"},
+	}
 
-	term.handleOutput([]byte{asciiBackspace})
-	term.handleOutput([]byte("ello"))
-
-	assert.Equal(t, "Hello", term.content.Text())
+	for _, test := range tests {
+		t.Run(test.input, func(t *testing.T) {
+			term := New()
+			term.Resize(fyne.NewSize(50, 50))
+			term.handleOutput([]byte(test.input))
+			assert.Equal(t, test.expected, term.content.Text())
+		})
+	}
 }

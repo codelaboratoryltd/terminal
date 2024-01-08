@@ -265,6 +265,10 @@ func handleOutputBackspace(t *Terminal) {
 	if len(row.Cells) == 0 {
 		return
 	}
+	if len(row.Cells) == t.cursorCol {
+		c := t.content.Rows[t.cursorRow].Cells
+		t.content.Rows[t.cursorRow].Cells = c[:len(c)-1]
+	}
 	t.moveCursor(t.cursorRow, t.cursorCol-1)
 }
 
