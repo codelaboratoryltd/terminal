@@ -84,11 +84,12 @@ type Terminal struct {
 	bracketedPasteMode     bool
 	state                  *parseState
 	blinking               bool
-	underlined         bool
+	underlined             bool
 	printData              []byte
 	printer                Printer
 	cmd                    *exec.Cmd
 	readWriterConfigurator ReadWriterConfigurator
+	keyRemap               map[fyne.KeyName]fyne.KeyName
 }
 
 // Printer is used for spooling print data when its received.
@@ -479,6 +480,7 @@ func New() *Terminal {
 	t := &Terminal{
 		mouseCursor: desktop.DefaultCursor,
 		in:          discardWriter{},
+		keyRemap:    map[fyne.KeyName]fyne.KeyName{},
 	}
 	t.ExtendBaseWidget(t)
 
@@ -559,4 +561,9 @@ type ReadWriterConfiguratorFunc func(r io.Reader, w io.WriteCloser) (io.Reader, 
 // It calls the ReadWriterConfiguratorFunc itself.
 func (m ReadWriterConfiguratorFunc) SetupReadWriter(r io.Reader, w io.WriteCloser) (io.Reader, io.WriteCloser) {
 	return m(r, w)
+}
+
+// RemapKey remaps a key when processing input.
+func (t *Terminal) RemapKey(key fyne.KeyName, remap fyne.KeyName) {
+	t.keyRemap[key] = remap
 }
