@@ -16,6 +16,7 @@ import (
 	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/driver/mobile"
 	"fyne.io/fyne/v2/widget"
+
 	widget2 "github.com/fyne-io/terminal/internal/widget"
 )
 
@@ -129,10 +130,8 @@ func (t *Terminal) MinSize() fyne.Size {
 
 // MouseDown handles the down action for desktop mouse events.
 func (t *Terminal) MouseDown(ev *desktop.MouseEvent) {
-	if t.hasSelectedText() {
-		t.copySelectedText(fyne.CurrentApp().Clipboard())
-		t.clearSelectedText()
-	}
+	t.clearSelectedText()
+
 	if ev.Button == desktop.MouseButtonSecondary {
 		t.pasteText(fyne.CurrentApp().Clipboard())
 	}
@@ -153,6 +152,10 @@ func (t *Terminal) MouseUp(ev *desktop.MouseEvent) {
 
 	if t.onMouseDown == nil {
 		return
+	}
+
+	if t.hasSelectedText() {
+		t.copySelectedText(fyne.CurrentApp().Clipboard(), false)
 	}
 
 	if ev.Button == desktop.MouseButtonPrimary {
@@ -205,6 +208,10 @@ func (t *Terminal) DoubleTapped(pe *fyne.PointEvent) {
 	t.selEnd = &position{Row: row, Col: end}
 
 	t.highlightSelectedText()
+
+	if t.hasSelectedText() {
+		t.copySelectedText(fyne.CurrentApp().Clipboard(), false)
+	}
 }
 
 // RemoveListener de-registers a Config channel and closes it
@@ -447,7 +454,7 @@ func (t *Terminal) setupShortcuts() {
 	t.ShortcutHandler.AddShortcut(shortcutCopy,
 		func(_ fyne.Shortcut) {
 			a := fyne.CurrentApp()
-			t.copySelectedText(a.Clipboard())
+			t.copySelectedText(a.Clipboard(), false)
 		})
 }
 
@@ -509,6 +516,7 @@ func (t *Terminal) Dragged(d *fyne.DragEvent) {
 		t.selStart = &p
 		t.selEnd = nil
 	}
+
 	// clear any previous selection
 	sr, sc, er, ec := t.getSelectedRange()
 	widget2.ClearHighlightRange(t.content, t.blockMode, sr, sc, er, ec)
@@ -525,7 +533,7 @@ func (t *Terminal) Dragged(d *fyne.DragEvent) {
 func (t *Terminal) DragEnd() {
 	t.selecting = false
 	if t.hasSelectedText() {
-		t.copySelectedText(fyne.CurrentApp().Clipboard())
+		t.copySelectedText(fyne.CurrentApp().Clipboard(), false)
 	}
 }
 
