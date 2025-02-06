@@ -3,10 +3,9 @@ package widget
 import (
 	"time"
 
-	"fyne.io/fyne/v2/widget"
-
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/theme"
+	"fyne.io/fyne/v2/widget"
 )
 
 const (
@@ -20,6 +19,7 @@ const (
 // This is designed to be used by our terminal emulator.
 type TermGrid struct {
 	widget.TextGrid
+	theme fyne.Theme
 }
 
 // CreateRenderer is a private method to Fyne which links this widget to it's renderer
@@ -32,6 +32,14 @@ func (t *TermGrid) CreateRenderer() fyne.WidgetRenderer {
 	widget.TextGridStyleWhitespace = &widget.CustomTextGridStyle{FGColor: theme.Color(theme.ColorNameDisabled)}
 
 	return render
+}
+
+func (t *TermGrid) Theme() fyne.Theme {
+	return t.theme
+}
+
+func (t *TermGrid) SetTheme(f fyne.Theme) {
+	t.theme = f
 }
 
 // NewTermGrid creates a new empty TextGrid widget.

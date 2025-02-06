@@ -15,6 +15,7 @@ import (
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/driver/mobile"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
 	widget2 "github.com/fyne-io/terminal/internal/widget"
@@ -107,6 +108,11 @@ func (p PrinterFunc) Print(d []byte) {
 // Cursor is used for displaying a specific cursor.
 func (t *Terminal) Cursor() desktop.Cursor {
 	return t.mouseCursor
+}
+
+// SetTheme ...
+func (t *Terminal) SetTheme(theme fyne.Theme) {
+	t.content.SetTheme(theme)
 }
 
 // AcceptsTab indicates that this widget will use the Tab key (avoids loss of focus).
