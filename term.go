@@ -362,9 +362,9 @@ func (t *Terminal) close() error {
 func (t *Terminal) guessCellSize() fyne.Size {
 	cell := canvas.NewText("M", color.White)
 	cell.TextStyle.Monospace = true
-
-	min := cell.MinSize()
-	return fyne.NewSize(float32(math.Round(float64(min.Width))), float32(math.Round(float64(min.Height))))
+	cell.TextSize = t.Theme().Size(theme.SizeNameText)
+	moo := cell.MinSize()
+	return fyne.NewSize(float32(math.Round(float64(moo.Width))), float32(math.Round(float64(moo.Height))))
 }
 
 func (t *Terminal) run() {
