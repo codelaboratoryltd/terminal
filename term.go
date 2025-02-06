@@ -378,7 +378,7 @@ func (t *Terminal) run() {
 				t.cmd.Wait()
 			}
 			// this is the pre-go 1.13 way to check for the read failing (terminal closed)
-			if err.Error() == "EOF" {
+			if err.Error() == io.EOF.Error() {
 				break // term exit on macOS
 			} else if err, ok := err.(*os.PathError); ok && err.Err.Error() == "input/output error" {
 				break // broken pipe, terminal exit
