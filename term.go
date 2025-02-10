@@ -1,6 +1,7 @@
 package terminal
 
 import (
+	"context"
 	"image/color"
 	"io"
 	"math"
@@ -401,7 +402,7 @@ func (t *Terminal) run() {
 }
 
 // RunLocalShell starts the terminal by loading a shell and starting to process the input/output.
-func (t *Terminal) RunLocalShell(closeChan chan bool) error {
+func (t *Terminal) RunLocalShell(ctx context.Context, cancel context.CancelFunc) error {
 	for t.config.Columns == 0 { // don't load the TTY until our output is configured
 		time.Sleep(time.Millisecond * 50)
 	}
@@ -410,12 +411,12 @@ func (t *Terminal) RunLocalShell(closeChan chan bool) error {
 		return err
 	}
 
-	if closeChan != nil {
+	if ctx != nil {
 		go func() {
+			defer cancel()
 			t.run()
-			closeChan <- true
 		}()
-		<-closeChan
+		<-ctx.Done()
 	} else {
 		// No channel, run in standard blocking mode
 		t.run()
