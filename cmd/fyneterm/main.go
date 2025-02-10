@@ -117,7 +117,7 @@ func newTerminalWindow(a fyne.App, th fyne.Theme, debug bool) fyne.Window {
 		})
 
 	go func() {
-		err := t.RunLocalShell()
+		err := t.RunLocalShell(nil)
 		if err != nil {
 			fyne.LogError("Failure in terminal", err)
 		}
