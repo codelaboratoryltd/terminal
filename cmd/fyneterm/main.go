@@ -12,6 +12,7 @@ import (
 	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/lang"
 	"fyne.io/fyne/v2/theme"
+
 	"github.com/fyne-io/terminal"
 	"github.com/fyne-io/terminal/cmd/fyneterm/data"
 )
@@ -117,7 +118,7 @@ func newTerminalWindow(a fyne.App, th fyne.Theme, debug bool) fyne.Window {
 		})
 
 	go func() {
-		err := t.RunLocalShell(nil)
+		err := t.RunLocalShell(nil, nil)
 		if err != nil {
 			fyne.LogError("Failure in terminal", err)
 		}

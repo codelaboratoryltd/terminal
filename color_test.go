@@ -7,9 +7,11 @@ import (
 	"testing"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
-	widget2 "github.com/fyne-io/terminal/internal/widget"
 	"github.com/stretchr/testify/assert"
+
+	widget2 "github.com/fyne-io/terminal/internal/widget"
 )
 
 func esc(s string) string {
@@ -930,6 +932,7 @@ func TestHandleOutput_BufferCutoff(t *testing.T) {
 	term.handleOutput([]byte("\x1b[38;5;64"))
 	term.handleOutput([]byte("m40\x1b[38;5;65m41"))
 	tg := widget2.NewTermGrid()
+	tg.SetTheme(theme.DefaultTheme())
 	tg.Resize(termsize)
 	c1 := &color.RGBA{R: 95, G: 135, A: 255}
 	c2 := &color.RGBA{R: 95, G: 135, B: 95, A: 255}

@@ -4,9 +4,11 @@ import (
 	"testing"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
-	widget2 "github.com/fyne-io/terminal/internal/widget"
 	"github.com/stretchr/testify/assert"
+
+	widget2 "github.com/fyne-io/terminal/internal/widget"
 )
 
 func TestGetSelectedRange(t *testing.T) {
@@ -129,6 +131,7 @@ func TestDoubleTapped(t *testing.T) {
 	term := &Terminal{
 		content: grid,
 	}
+	term.SetTheme(theme.DefaultTheme())
 	term.Resize(fyne.NewSize(500, 500))
 
 	tests := map[string]struct {

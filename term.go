@@ -496,6 +496,7 @@ func New() *Terminal {
 	t.ExtendBaseWidget(t)
 	t.content = widget2.NewTermGrid()
 	t.setupShortcuts()
+	t.SetTheme(theme.DefaultTheme())
 
 	return t
 }
