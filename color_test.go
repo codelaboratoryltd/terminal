@@ -121,7 +121,7 @@ func TestHandleOutput_ANSI_Colors(t *testing.T) {
 	}{
 		"[30m": {
 			inputSeq:     esc("[30m"),
-			expectedFg:   color.Black,
+			expectedFg:   &color.RGBA{R: 0, G: 0, B: 0, A: 255},
 			expectedBg:   nil,
 			expectedBold: false,
 		},
@@ -686,7 +686,7 @@ func TestHandleOutput_xterm_256_2(t *testing.T) {
 	}{
 		"[38;5;0m": {
 			inputSeq:     esc("[38;5;0m"),
-			expectedFg:   color.Black,
+			expectedFg:   &color.RGBA{R: 0, G: 0, B: 0, A: 255},
 			expectedBg:   nil,
 			expectedBold: false,
 		},
@@ -914,7 +914,7 @@ func TestHandleOutput_24_bit_colour(t *testing.T) {
 		},
 		"DarkViolet (bg)": {
 			inputSeq:     esc("[30;48;2;148;0;211m"),
-			expectedFg:   color.Black,
+			expectedFg:   &color.RGBA{R: 0, G: 0, B: 0, A: 255},
 			expectedBg:   &color.RGBA{148, 0, 211, 255},
 			expectedBold: false,
 		},
