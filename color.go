@@ -12,14 +12,14 @@ import (
 
 var (
 	basicColors = []color.Color{
-		color.Black,
-		&color.RGBA{170, 0, 0, 255},
-		&color.RGBA{0, 170, 0, 255},
-		&color.RGBA{170, 170, 0, 255},
-		&color.RGBA{0, 0, 170, 255},
-		&color.RGBA{170, 0, 170, 255},
-		&color.RGBA{0, 255, 255, 255},
-		&color.RGBA{170, 170, 170, 255},
+		&color.RGBA{0, 0, 0, 255},       // Back
+		&color.RGBA{170, 0, 0, 255},     // Red
+		&color.RGBA{0, 170, 0, 255},     // Green
+		&color.RGBA{170, 170, 0, 255},   // Yellow
+		&color.RGBA{0, 0, 170, 255},     // Blue
+		&color.RGBA{170, 0, 170, 255},   // Purple
+		&color.RGBA{0, 255, 255, 255},   // Cyan
+		&color.RGBA{170, 170, 170, 255}, // Grey
 	}
 	brightColors = []color.Color{
 		&color.RGBA{85, 85, 85, 255},
