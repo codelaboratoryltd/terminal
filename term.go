@@ -414,6 +414,7 @@ func (t *Terminal) RunLocalShell(ctx context.Context, cancel context.CancelFunc)
 	for t.config.Columns == 0 { // don't load the TTY until our output is configured
 		time.Sleep(time.Millisecond * 50)
 	}
+
 	err := t.open()
 	if err != nil {
 		return err

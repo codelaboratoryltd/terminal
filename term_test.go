@@ -28,7 +28,7 @@ func TestExitCode(t *testing.T) {
 func testExitCodeN(t *testing.T, n int) {
 	term := New()
 	term.Resize(fyne.NewSize(45, 45))
-	go term.RunLocalShell(nil)
+	go term.RunLocalShell(nil, nil)
 	err := errors.New("NotYet")
 	for err != nil {
 		time.Sleep(50 * time.Millisecond)
