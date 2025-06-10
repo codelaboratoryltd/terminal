@@ -376,20 +376,19 @@ func escapeScrollUp(t *Terminal, msg string) {
 		lines = 1
 	}
 
-	// Ensure we are within the scrollable area
-	if t.cursorRow < t.scrollTop || t.cursorRow > t.scrollBottom {
-		return
-	}
-
-	// Calculate new cursor position after scrolling
+	// Calculate the new cursor position after scrolling
 	newCursorRow := t.cursorRow - lines
+	// Make sure we never end up negative cursor row
+	if newCursorRow < 0 {
+		newCursorRow = 0
+	}
 
 	// Make sure we don't scroll above the scroll top
 	if newCursorRow < t.scrollTop {
 		newCursorRow = t.scrollTop
 	}
 
-	// Move cursor to the new position
+	// Move the cursor to the new position
 	t.moveCursor(newCursorRow, t.cursorCol)
 
 	// Perform the actual scrolling action
