@@ -15,7 +15,7 @@ func HighlightRange(t *TermGrid, blockMode bool, startRow, startCol, endRow, end
 		// Check if already highlighted
 		if h, ok := cell.Style.(*TermTextGridStyle); !ok {
 			if cell.Style != nil {
-				cell.Style = NewTermTextGridStyle(cell.Style.TextColor(), cell.Style.BackgroundColor(), bitmask, false, false, false)
+				cell.Style = NewTermTextGridStyle(cell.Style.TextColor(), cell.Style.BackgroundColor(), bitmask, false, cell.Style.Style().Bold, cell.Style.Style().Underline)
 			} else {
 				cell.Style = NewTermTextGridStyle(nil, nil, bitmask, false, false, false)
 			}
@@ -175,8 +175,6 @@ type TermTextGridStyle struct {
 	Highlighted             bool
 	BlinkEnabled            bool
 	blinked                 bool
-	IsBold                  bool
-	IsUnderlined            bool
 }
 
 // Style is the text style a cell should use.
@@ -215,12 +213,12 @@ func (h *TermTextGridStyle) blink(b bool) {
 
 // Bold is the text bold or not.
 func (h *TermTextGridStyle) Bold() bool {
-	return h.IsBold
+	return h.Style().Bold
 }
 
 // Underlined is the text underlined or not.
 func (h *TermTextGridStyle) Underlined() bool {
-	return h.IsUnderlined
+	return h.Style().Underline
 }
 
 // HighlightOption defines a function type that can modify a TermTextGridStyle.
@@ -261,8 +259,13 @@ func NewTermTextGridStyle(fg, bg color.Color, bitmask byte, blinkEnabled, bold, 
 		InvertedBackgroundColor: invertedBg,
 		Highlighted:             false,
 		BlinkEnabled:            blinkEnabled,
-		IsBold:                  bold,
-		IsUnderlined:            underlined,
+		TextStyle: fyne.TextStyle{
+			Bold:      bold,
+			Underline: underlined,
+			Italic:    false, // Not implemented?
+			Monospace: true,  // Terminal should always be monospace, otherwise it'd not work correctly
+			Symbol:    false,
+		},
 	}
 }
 
