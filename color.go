@@ -79,20 +79,20 @@ func (t *Terminal) handleColorMode(modeStr string) {
 		return
 	}
 	switch mode {
-	case 0:
+	case 0: // Reset - clear all formatting and colors
 		t.currentBG, t.currentFG = nil, nil
 		t.bold = false
 		t.blinking = false
 		t.underlined = false
-	case 1:
+	case 1: // Bold/bright text
 		t.bold = true
-	case 4:
+	case 4: // Underlined text
 		t.underlined = true
-	case 5:
+	case 5: // Blinking text
 		t.blinking = true
-	case 24:
+	case 24: // Not underlined - remove underline
 		t.underlined = false
-	case 7: // reverse
+	case 7: // Reverse video - swap foreground and background colors
 		bg, fg := t.currentBG, t.currentFG
 		if fg == nil {
 			t.currentBG = theme.Color(theme.ColorNameForeground)
@@ -104,7 +104,7 @@ func (t *Terminal) handleColorMode(modeStr string) {
 		} else {
 			t.currentFG = bg
 		}
-	case 27: // reverse off
+	case 27: // Not reversed - turn off reverse video
 		bg, fg := t.currentBG, t.currentFG
 		if fg != nil {
 			t.currentBG = nil
@@ -117,16 +117,20 @@ func (t *Terminal) handleColorMode(modeStr string) {
 			t.currentFG = bg
 		}
 	case 30, 31, 32, 33, 34, 35, 36, 37:
+		// Standard foreground colors (black, red, green, yellow, blue, magenta, cyan, white)
 		t.currentFG = basicColors[mode-30]
-	case 39:
+	case 39: // Default foreground color
 		t.currentFG = nil
 	case 40, 41, 42, 43, 44, 45, 46, 47:
+		// Standard background colors (black, red, green, yellow, blue, magenta, cyan, white)
 		t.currentBG = basicColors[mode-40]
-	case 49:
+	case 49: // Default background color
 		t.currentBG = nil
 	case 90, 91, 92, 93, 94, 95, 96, 97:
+		// Bright foreground colors (bright black/gray, bright red, etc.)
 		t.currentFG = brightColors[mode-90]
 	case 100, 101, 102, 103, 104, 105, 106, 107:
+		// Bright background colors (bright black/gray, bright red, etc.)
 		t.currentBG = brightColors[mode-100]
 	default:
 		if t.debug {
