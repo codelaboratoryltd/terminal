@@ -266,6 +266,9 @@ func escapePrivateMode(t *Terminal, msg string, enable bool) {
 		switch mode {
 		case "7":
 			//TODO wrap around mode
+			if t.debug {
+				log.Println("Wrap around mode not supported")
+			}
 		case "20":
 			t.newLineMode = enable
 		case "25":
@@ -293,6 +296,9 @@ func escapePrivateMode(t *Terminal, msg string, enable bool) {
 			t.bracketedPasteMode = enable
 		case "47":
 			// TODO save screen
+			if t.debug {
+				log.Println("Save screen mode not supported")
+			}
 			/*
 				if enable {
 					// save screen
