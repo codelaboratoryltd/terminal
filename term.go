@@ -274,7 +274,14 @@ func (t *Terminal) SetStartDir(path string) {
 
 // Tapped makes sure we ask for focus if user taps us.
 func (t *Terminal) Tapped(ev *fyne.PointEvent) {
-	fyne.CurrentApp().Driver().CanvasForObject(t).Focus(t)
+	if a := fyne.CurrentApp(); a != nil {
+		if d := a.Driver(); d != nil {
+			if c := d.CanvasForObject(t); c != nil {
+				c.Focus(t)
+			}
+		}
+	}
+
 }
 
 // Text returns the contents of the buffer as a single string joined with `\n` (no style information).
