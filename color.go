@@ -12,7 +12,7 @@ import (
 
 var (
 	basicColors = []color.Color{
-		&color.RGBA{0, 0, 0, 255},       // Black
+		&color.Black,                    // Black
 		&color.RGBA{170, 0, 0, 255},     // Red
 		&color.RGBA{0, 170, 0, 255},     // Green
 		&color.RGBA{170, 170, 0, 255},   // Yellow
