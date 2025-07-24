@@ -55,7 +55,10 @@ func (t *TermGrid) refreshBlink(blink bool) {
 			}
 		}
 	}
-	t.TextGrid.Refresh()
+
+	fyne.Do(func() {
+		t.TextGrid.Refresh()
+	})
 
 	switch {
 	case shouldBlink && t.tickerCancel == nil:
