@@ -62,6 +62,9 @@ type Terminal struct {
 	savedRow, savedCol         int
 	scrollTop, scrollBottom    int
 
+	// Theme override for ANSI colors
+	customTheme fyne.Theme
+
 	cursor                   *canvas.Rectangle
 	cursorHidden, bufferMode bool // buffer mode is an xterm extension that impacts control keys
 	cursorMoved              func()
@@ -593,4 +596,9 @@ func (m ReadWriterConfiguratorFunc) SetupReadWriter(r io.Reader, w io.WriteClose
 // RemapKey remaps a key when processing input.
 func (t *Terminal) RemapKey(key fyne.KeyName, remap fyne.KeyName) {
 	t.keyRemap[key] = remap
+}
+
+// SetTheme sets a custom theme for this terminal's ANSI colors
+func (t *Terminal) SetTheme(th fyne.Theme) {
+	t.customTheme = th
 }

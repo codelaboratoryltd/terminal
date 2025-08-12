@@ -10,27 +10,178 @@ import (
 	"fyne.io/fyne/v2/theme"
 )
 
-var (
-	basicColors = []color.Color{
-		&color.Black,                    // Black
+// getBasicColor returns a basic ANSI color (0-7) from the theme
+func (t *Terminal) getBasicColor(index int) color.Color {
+	colorNames := []fyne.ThemeColorName{
+		"ansiBlack", "ansiRed", "ansiGreen", "ansiYellow",
+		"ansiBlue", "ansiMagenta", "ansiCyan", "ansiWhite",
+	}
+	fallbackColors := []color.Color{
+		&color.RGBA{0, 0, 0, 255},       // Black
 		&color.RGBA{170, 0, 0, 255},     // Red
 		&color.RGBA{0, 170, 0, 255},     // Green
 		&color.RGBA{170, 170, 0, 255},   // Yellow
 		&color.RGBA{0, 0, 170, 255},     // Blue
-		&color.RGBA{170, 0, 170, 255},   // Purple
+		&color.RGBA{170, 0, 170, 255},   // Magenta
 		&color.RGBA{0, 255, 255, 255},   // Cyan
-		&color.RGBA{170, 170, 170, 255}, // Grey
+		&color.RGBA{170, 170, 170, 255}, // White
 	}
-	brightColors = []color.Color{
-		&color.RGBA{85, 85, 85, 255},    // Grey
-		&color.RGBA{255, 85, 85, 255},   // Light Red
-		&color.RGBA{85, 255, 85, 255},   // Light Green
-		&color.RGBA{255, 255, 85, 255},  // Light Yellow
-		&color.RGBA{85, 85, 255, 255},   // Light Blue
-		&color.RGBA{255, 85, 255, 255},  // Light Purple
-		&color.RGBA{85, 255, 255, 255},  // Light Cyan
-		&color.RGBA{255, 255, 255, 255}, // White
+
+	if index < 0 || index >= len(colorNames) {
+		return color.White
 	}
+
+	// Use custom theme if set, otherwise fall back to global theme
+	if t.customTheme != nil {
+		themeColor := t.customTheme.Color(colorNames[index], theme.VariantDark)
+		if themeColor != nil && themeColor != color.Transparent {
+			return themeColor
+		}
+	} else {
+		themeColor := theme.Color(colorNames[index])
+		if themeColor != nil && themeColor != color.Transparent {
+			return themeColor
+		}
+	}
+
+	// Fall back to hardcoded colors if theme doesn't support ANSI colors
+	return fallbackColors[index]
+}
+
+// getBrightColor returns a bright ANSI color (8-15) from the theme
+func (t *Terminal) getBrightColor(index int) color.Color {
+	colorNames := []fyne.ThemeColorName{
+		"ansiBrightBlack", "ansiBrightRed", "ansiBrightGreen", "ansiBrightYellow",
+		"ansiBrightBlue", "ansiBrightMagenta", "ansiBrightCyan", "ansiBrightWhite",
+	}
+	fallbackColors := []color.Color{
+		&color.RGBA{85, 85, 85, 255},    // Bright Black (Gray)
+		&color.RGBA{255, 85, 85, 255},   // Bright Red
+		&color.RGBA{85, 255, 85, 255},   // Bright Green
+		&color.RGBA{255, 255, 85, 255},  // Bright Yellow
+		&color.RGBA{85, 85, 255, 255},   // Bright Blue
+		&color.RGBA{255, 85, 255, 255},  // Bright Magenta
+		&color.RGBA{85, 255, 255, 255},  // Bright Cyan
+		&color.RGBA{255, 255, 255, 255}, // Bright White
+	}
+
+	if index < 0 || index >= len(colorNames) {
+		return color.White
+	}
+
+	// Use custom theme if set, otherwise fall back to global theme
+	if t.customTheme != nil {
+		themeColor := t.customTheme.Color(colorNames[index], theme.VariantDark)
+		if themeColor != nil && themeColor != color.Transparent {
+			return themeColor
+		}
+	} else {
+		themeColor := theme.Color(colorNames[index])
+		if themeColor != nil && themeColor != color.Transparent {
+			return themeColor
+		}
+	}
+
+	// Fall back to hardcoded colors if theme doesn't support ANSI colors
+	return fallbackColors[index]
+}
+
+// applyThemeAdjustments applies brightness and contrast adjustments from the custom theme
+func (t *Terminal) applyThemeAdjustments(baseColor color.RGBA, isForeground bool) color.Color {
+	if t.customTheme == nil {
+		return &baseColor
+	}
+
+	// Check if the custom theme has brightness/contrast adjustment methods
+	// We need to access the TermTheme's adjustment methods
+	if termTheme, ok := t.customTheme.(interface {
+		GetBrightnessBoost() float32
+		GetContrastBoost() float32
+	}); ok {
+		brightnessBoost := termTheme.GetBrightnessBoost()
+		contrastBoost := termTheme.GetContrastBoost()
+
+		if brightnessBoost == 0 && contrastBoost == 0 {
+			return &baseColor
+		}
+
+		r, g, b := float32(baseColor.R), float32(baseColor.G), float32(baseColor.B)
+
+		// Apply brightness adjustment (positive = brighter, negative = dimmer)
+		if brightnessBoost != 0 {
+			if brightnessBoost > 0 {
+				// Positive: brighten by moving towards white
+				r += (255 - r) * brightnessBoost
+				g += (255 - g) * brightnessBoost
+				b += (255 - b) * brightnessBoost
+			} else {
+				// Negative: dim by moving towards black
+				factor := 1 + brightnessBoost // Convert negative boost to factor
+				r *= factor
+				g *= factor
+				b *= factor
+			}
+		}
+
+		// Apply contrast adjustment (positive = more contrast, negative = less contrast)
+		if contrastBoost != 0 {
+			midpoint := float32(127.5)
+
+			if contrastBoost > 0 {
+				// Positive: increase contrast by pushing away from middle gray
+				if isForeground {
+					// Push bright colors towards white
+					if r > midpoint {
+						r += (255 - r) * contrastBoost
+					}
+					if g > midpoint {
+						g += (255 - g) * contrastBoost
+					}
+					if b > midpoint {
+						b += (255 - b) * contrastBoost
+					}
+				} else {
+					// For background colors, push towards black for more contrast
+					r *= (1 - contrastBoost)
+					g *= (1 - contrastBoost)
+					b *= (1 - contrastBoost)
+				}
+			} else {
+				// Negative: decrease contrast by moving towards middle gray
+				factor := -contrastBoost // Convert negative to positive factor
+				r += (midpoint - r) * factor
+				g += (midpoint - g) * factor
+				b += (midpoint - b) * factor
+			}
+		}
+
+		// Clamp values to valid range
+		if r > 255 {
+			r = 255
+		}
+		if g > 255 {
+			g = 255
+		}
+		if b > 255 {
+			b = 255
+		}
+		if r < 0 {
+			r = 0
+		}
+		if g < 0 {
+			g = 0
+		}
+		if b < 0 {
+			b = 0
+		}
+
+		return &color.RGBA{R: uint8(r), G: uint8(g), B: uint8(b), A: baseColor.A}
+	}
+
+	return &baseColor
+}
+
+var (
 	colourBands = []uint8{
 		0x00,
 		0x5f,
@@ -124,20 +275,20 @@ func (t *Terminal) handleColorMode(modeStr string) {
 		}
 	case 30, 31, 32, 33, 34, 35, 36, 37:
 		// Standard foreground colors (black, red, green, yellow, blue, magenta, cyan, white)
-		t.currentFG = basicColors[mode-30]
+		t.currentFG = t.getBasicColor(mode - 30)
 	case 39: // Default foreground color
 		t.currentFG = nil
 	case 40, 41, 42, 43, 44, 45, 46, 47:
 		// Standard background colors (black, red, green, yellow, blue, magenta, cyan, white)
-		t.currentBG = basicColors[mode-40]
+		t.currentBG = t.getBasicColor(mode - 40)
 	case 49: // Default background color
 		t.currentBG = nil
 	case 90, 91, 92, 93, 94, 95, 96, 97:
 		// Bright foreground colors (bright black/gray, bright red, etc.)
-		t.currentFG = brightColors[mode-90]
+		t.currentFG = t.getBrightColor(mode - 90)
 	case 100, 101, 102, 103, 104, 105, 106, 107:
 		// Bright background colors (bright black/gray, bright red, etc.)
-		t.currentBG = brightColors[mode-100]
+		t.currentBG = t.getBrightColor(mode - 100)
 	default:
 		if t.debug {
 			log.Println("Unsupported graphics mode", mode)
@@ -155,21 +306,25 @@ func (t *Terminal) handleColorModeMap(mode, ids string) {
 		return
 	}
 	if id <= 7 {
-		c = basicColors[id]
+		c = t.getBasicColor(id)
 	} else if id <= 15 {
-		c = brightColors[id-8]
+		c = t.getBrightColor(id - 8)
 	} else if id <= 231 {
 		id -= 16
 		b := id % 6
 		id = (id - b) / 6
 		g := id % 6
 		r := (id - g) / 6
-		c = &color.RGBA{colourBands[r], colourBands[g], colourBands[b], 255}
+		baseColor := &color.RGBA{colourBands[r], colourBands[g], colourBands[b], 255}
+		// Apply theme adjustments to 256-color palette
+		c = t.applyThemeAdjustments(*baseColor, mode == "38")
 	} else if id <= 255 {
 		id -= 232
 		inc := 256 / 24
 		y := id * inc
-		c = &color.Gray{uint8(y)}
+		baseColor := &color.RGBA{uint8(y), uint8(y), uint8(y), 255}
+		// Apply theme adjustments to grayscale colors
+		c = t.applyThemeAdjustments(*baseColor, mode == "38")
 	} else if t.debug {
 		log.Println("Invalid colour map ID", id)
 	}
@@ -185,7 +340,10 @@ func (t *Terminal) handleColorModeRGB(mode, rs, gs, bs string) {
 	r, _ := strconv.Atoi(rs)
 	g, _ := strconv.Atoi(gs)
 	b, _ := strconv.Atoi(bs)
-	c := &color.RGBA{uint8(r), uint8(g), uint8(b), 255}
+	baseColor := &color.RGBA{uint8(r), uint8(g), uint8(b), 255}
+
+	// Apply theme adjustments to 24-bit RGB colors
+	c := t.applyThemeAdjustments(*baseColor, mode == "38")
 
 	if mode == "38" {
 		t.currentFG = c
