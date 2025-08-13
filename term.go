@@ -430,7 +430,9 @@ func (t *Terminal) RunLocalShell(ctx context.Context, cancel context.CancelFunc)
 
 	if ctx != nil {
 		go func() {
-			defer cancel()
+			if cancel != nil {
+				defer cancel()
+			}
 			t.run()
 		}()
 		<-ctx.Done()
