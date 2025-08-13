@@ -322,9 +322,14 @@ func (t *Terminal) handleColorModeMap(mode, ids string) {
 		id -= 232
 		inc := 256 / 24
 		y := id * inc
-		baseColor := &color.RGBA{uint8(y), uint8(y), uint8(y), 255}
-		// Apply theme adjustments to grayscale colors
-		c = t.applyThemeAdjustments(*baseColor, mode == "38")
+		// For grayscale colors, use color.Gray when no theme adjustments are needed
+		if t.customTheme == nil {
+			c = &color.Gray{uint8(y)}
+		} else {
+			baseColor := &color.RGBA{uint8(y), uint8(y), uint8(y), 255}
+			// Apply theme adjustments to grayscale colors
+			c = t.applyThemeAdjustments(*baseColor, mode == "38")
+		}
 	} else if t.debug {
 		log.Println("Invalid colour map ID", id)
 	}
