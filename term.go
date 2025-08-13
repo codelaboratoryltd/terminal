@@ -64,6 +64,8 @@ type Terminal struct {
 
 	// Theme override for ANSI colors
 	customTheme fyne.Theme
+	// OSC handlers for Operating System Commands
+	oscHandlers map[int]func(string)
 
 	cursor                   *canvas.Rectangle
 	cursorHidden, bufferMode bool // buffer mode is an xterm extension that impacts control keys
@@ -128,6 +130,16 @@ func (t *Terminal) AddListener(listener chan Config) {
 	defer t.listenerLock.Unlock()
 
 	t.listeners = append(t.listeners, listener)
+}
+
+// RegisterOSCHandler registers a callback function for specific OSC command.
+// command: OSC command number (0, 1, 2, etc.)
+// handler: callback function that receives the title data
+func (t *Terminal) RegisterOSCHandler(command int, handler func(data string)) {
+	if t.oscHandlers == nil {
+		t.oscHandlers = make(map[int]func(string))
+	}
+	t.oscHandlers[command] = handler
 }
 
 // MinSize provides a size large enough that a terminal could technically funcion.
@@ -509,6 +521,7 @@ func New() *Terminal {
 		mouseCursor: desktop.DefaultCursor,
 		in:          discardWriter{},
 		keyRemap:    map[fyne.KeyName]fyne.KeyName{},
+		oscHandlers: make(map[int]func(string)),
 	}
 	t.ExtendBaseWidget(t)
 
