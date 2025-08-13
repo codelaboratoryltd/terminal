@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"flag"
 	"image/color"
@@ -18,7 +19,29 @@ import (
 	"fyne.io/fyne/v2/theme"
 )
 
-const termOverlay = fyne.ThemeColorName("termOver")
+const (
+	termOverlay = fyne.ThemeColorName("termOver")
+
+	// ANSI basic colors (0-7)
+	termColorBlack   = fyne.ThemeColorName("ansiBlack")
+	termColorRed     = fyne.ThemeColorName("ansiRed")
+	termColorGreen   = fyne.ThemeColorName("ansiGreen")
+	termColorYellow  = fyne.ThemeColorName("ansiYellow")
+	termColorBlue    = fyne.ThemeColorName("ansiBlue")
+	termColorMagenta = fyne.ThemeColorName("ansiMagenta")
+	termColorCyan    = fyne.ThemeColorName("ansiCyan")
+	termColorWhite   = fyne.ThemeColorName("ansiWhite")
+
+	// ANSI bright colors (8-15)
+	termColorBrightBlack   = fyne.ThemeColorName("ansiBrightBlack")
+	termColorBrightRed     = fyne.ThemeColorName("ansiBrightRed")
+	termColorBrightGreen   = fyne.ThemeColorName("ansiBrightGreen")
+	termColorBrightYellow  = fyne.ThemeColorName("ansiBrightYellow")
+	termColorBrightBlue    = fyne.ThemeColorName("ansiBrightBlue")
+	termColorBrightMagenta = fyne.ThemeColorName("ansiBrightMagenta")
+	termColorBrightCyan    = fyne.ThemeColorName("ansiBrightCyan")
+	termColorBrightWhite   = fyne.ThemeColorName("ansiBrightWhite")
+)
 
 //go:embed translation
 var translations embed.FS
@@ -65,10 +88,15 @@ func main() {
 	w.ShowAndRun()
 }
 
+var globalTheme *termTheme
+
 func newTerminalWindow(a fyne.App, debug bool) fyne.Window {
 	w := a.NewWindow(termTitle())
 	w.SetPadded(false)
 	th := newTermTheme()
+	if globalTheme == nil {
+		globalTheme = th
+	}
 
 	bg := canvas.NewRectangle(theme.Color(theme.ColorNameBackground))
 	img := canvas.NewImageFromResource(data.FyneLogo)
@@ -114,7 +142,7 @@ func newTerminalWindow(a fyne.App, debug bool) fyne.Window {
 		})
 
 	go func() {
-		err := t.RunLocalShell(nil, nil)
+		err := t.RunLocalShell(context.TODO(), nil)
 		if err != nil {
 			fyne.LogError("Failure in terminal", err)
 		}
