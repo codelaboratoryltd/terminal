@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"flag"
 	"image/color"
@@ -141,7 +142,7 @@ func newTerminalWindow(a fyne.App, debug bool) fyne.Window {
 		})
 
 	go func() {
-		err := t.RunLocalShell(nil, nil)
+		err := t.RunLocalShell(context.TODO(), nil)
 		if err != nil {
 			fyne.LogError("Failure in terminal", err)
 		}
