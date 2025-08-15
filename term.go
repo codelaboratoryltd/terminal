@@ -68,7 +68,8 @@ type Terminal struct {
 	oscHandlers map[int]func(string)
 
 	cursor                   *canvas.Rectangle
-	cursorHidden, bufferMode bool // buffer mode is an xterm extension that impacts control keys
+	cursorHidden, bufferMode bool   // buffer mode is an xterm extension that impacts control keys
+	cursorShape              string // "block" or "caret"
 	cursorMoved              func()
 
 	onMouseDown, onMouseUp func(int, fyne.KeyModifier, fyne.Position)
@@ -522,6 +523,7 @@ func New() *Terminal {
 		in:          discardWriter{},
 		keyRemap:    map[fyne.KeyName]fyne.KeyName{},
 		oscHandlers: make(map[int]func(string)),
+		cursorShape: "block", // Default to block cursor
 	}
 	t.ExtendBaseWidget(t)
 
@@ -616,4 +618,12 @@ func (t *Terminal) RemapKey(key fyne.KeyName, remap fyne.KeyName) {
 // SetTheme sets a custom theme for this terminal's ANSI colors
 func (t *Terminal) SetTheme(th fyne.Theme) {
 	t.customTheme = th
+}
+
+// SetCursorShape sets the cursor shape ("block" or "caret")
+func (t *Terminal) SetCursorShape(shape string) {
+	t.cursorShape = shape
+	if t.cursor != nil {
+		t.refreshCursor()
+	}
 }
