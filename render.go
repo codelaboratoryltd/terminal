@@ -9,7 +9,10 @@ import (
 	widget2 "github.com/fyne-io/terminal/internal/widget"
 )
 
-const cursorWidth = 2
+const (
+	cursorWidthBlock = 0 // 0 means use full cell width for block cursor
+	cursorWidthCaret = 2 // 2 pixels wide for caret cursor
+)
 
 type render struct {
 	term *Terminal
@@ -51,9 +54,29 @@ func (t *Terminal) refreshCursor() {
 	if t.bell {
 		t.cursor.FillColor = theme.Color(theme.ColorNameError)
 	} else {
-		t.cursor.FillColor = theme.Color(theme.ColorNamePrimary)
+		// Use custom theme cursor color if available, otherwise use primary
+		if t.customTheme != nil {
+			if cursorColor := t.customTheme.Color("cursor", theme.VariantDark); cursorColor != nil {
+				t.cursor.FillColor = cursorColor
+			} else {
+				t.cursor.FillColor = theme.Color(theme.ColorNamePrimary)
+			}
+		} else {
+			t.cursor.FillColor = theme.Color(theme.ColorNamePrimary)
+		}
 	}
-	t.cursor.Resize(fyne.NewSize(cursorWidth, t.guessCellSize().Height))
+
+	// Determine cursor width based on shape
+	cellSize := t.guessCellSize()
+	var width float32
+	if t.cursorShape == "caret" {
+		width = float32(cursorWidthCaret)
+	} else {
+		// Default to block cursor
+		width = cellSize.Width
+	}
+
+	t.cursor.Resize(fyne.NewSize(width, cellSize.Height))
 	fyne.Do(func() {
 		t.cursor.Refresh()
 	})
@@ -69,7 +92,17 @@ func (t *Terminal) CreateRenderer() fyne.WidgetRenderer {
 
 	t.cursor = canvas.NewRectangle(theme.Color(theme.ColorNamePrimary))
 	t.cursor.Hidden = true
-	t.cursor.Resize(fyne.NewSize(cursorWidth, t.guessCellSize().Height))
+
+	// Determine cursor width based on shape
+	cellSize := t.guessCellSize()
+	var width float32
+	if t.cursorShape == "caret" {
+		width = float32(cursorWidthCaret)
+	} else {
+		// Default to block cursor
+		width = cellSize.Width
+	}
+	t.cursor.Resize(fyne.NewSize(width, cellSize.Height))
 
 	r := &render{term: t}
 	t.cursorMoved = r.moveCursor
