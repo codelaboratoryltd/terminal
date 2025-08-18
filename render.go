@@ -85,9 +85,19 @@ func (t *Terminal) refreshCursor() {
 
 // CreateRenderer requests a new renderer for this terminal (just a wrapper around the TextGrid)
 func (t *Terminal) CreateRenderer() fyne.WidgetRenderer {
+	r := &render{term: t}
+	t.cursorMoved = r.moveCursor
+
+	if t.content != nil {
+		// Term already has content, just return the renderer with the existing term,
+		// leaving its content and setup intact
+		return r
+	}
+
 	t.ExtendBaseWidget(t)
 
 	t.content = widget2.NewTermGrid()
+
 	t.setupShortcuts()
 
 	t.cursor = canvas.NewRectangle(theme.Color(theme.ColorNamePrimary))
@@ -104,7 +114,5 @@ func (t *Terminal) CreateRenderer() fyne.WidgetRenderer {
 	}
 	t.cursor.Resize(fyne.NewSize(width, cellSize.Height))
 
-	r := &render{term: t}
-	t.cursorMoved = r.moveCursor
 	return r
 }
