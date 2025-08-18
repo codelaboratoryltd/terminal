@@ -97,6 +97,12 @@ type Terminal struct {
 	cmd                    *exec.Cmd
 	readWriterConfigurator ReadWriterConfigurator
 	keyRemap               map[fyne.KeyName]fyne.KeyName
+
+	cellSize struct {
+		sync.Mutex
+		size   fyne.Size
+		expire time.Time
+	}
 }
 
 // Printer is used for spooling print data when its received.
@@ -382,14 +388,27 @@ func (t *Terminal) close() error {
 	return t.pty.Close()
 }
 
-// don't call often - should we cache?
+// guessCellSize is called extremely frequently, so we cache the result brielfy.
 func (t *Terminal) guessCellSize() fyne.Size {
+	// Use cached size if available. Cache resets every 100ms
+	t.cellSize.Lock()
+	defer t.cellSize.Unlock()
+	if time.Now().Before(t.cellSize.expire) {
+		size := t.cellSize.size
+		return size
+	}
+
 	cell := canvas.NewText("M", color.White)
 	cell.TextStyle.Monospace = true
 
 	scale := t.Theme().Size(theme.SizeNameText) / theme.TextSize()
 	min := cell.MinSize()
-	return fyne.NewSize(float32(math.Round(float64(min.Width*scale))), float32(math.Round(float64(min.Height*scale))))
+
+	size := fyne.NewSize(float32(math.Round(float64(min.Width*scale))), float32(math.Round(float64(min.Height*scale))))
+	t.cellSize.size = size
+	t.cellSize.expire = time.Now().Add(100 * time.Millisecond)
+
+	return size
 }
 
 func (t *Terminal) run() {
