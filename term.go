@@ -402,9 +402,9 @@ func (t *Terminal) guessCellSize() fyne.Size {
 	cell.TextStyle.Monospace = true
 
 	scale := t.Theme().Size(theme.SizeNameText) / theme.TextSize()
-	min := cell.MinSize()
+	minSize := cell.MinSize()
 
-	size := fyne.NewSize(float32(math.Round(float64(min.Width*scale))), float32(math.Round(float64(min.Height*scale))))
+	size := fyne.NewSize(float32(math.Round(float64(minSize.Width*scale))), float32(math.Round(float64(minSize.Height*scale))))
 	t.cellSize.size = size
 	t.cellSize.expire = time.Now().Add(100 * time.Millisecond)
 
