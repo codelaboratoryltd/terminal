@@ -99,7 +99,7 @@ type Terminal struct {
 	keyRemap               map[fyne.KeyName]fyne.KeyName
 
 	cellSize struct {
-		sync.Mutex
+		text   *canvas.Text
 		size   fyne.Size
 		expire time.Time
 	}
@@ -388,23 +388,23 @@ func (t *Terminal) close() error {
 	return t.pty.Close()
 }
 
-// guessCellSize is called extremely frequently, so we cache the result brielfy.
+// guessCellSize is called extremely frequently, so we cache the result briefly
 func (t *Terminal) guessCellSize() fyne.Size {
 	// Use cached size if available. Cache resets every 100ms
-	t.cellSize.Lock()
-	defer t.cellSize.Unlock()
 	if time.Now().Before(t.cellSize.expire) {
-		size := t.cellSize.size
-		return size
+		return t.cellSize.size
 	}
 
-	cell := canvas.NewText("M", color.White)
-	cell.TextStyle.Monospace = true
+	if t.cellSize.text == nil {
+		t.cellSize.text = canvas.NewText("M", color.White)
+		t.cellSize.text.TextStyle.Monospace = true
+	}
 
 	scale := t.Theme().Size(theme.SizeNameText) / theme.TextSize()
-	minSize := cell.MinSize()
-
+	minSize := t.cellSize.text.MinSize()
 	size := fyne.NewSize(float32(math.Round(float64(minSize.Width*scale))), float32(math.Round(float64(minSize.Height*scale))))
+
+	// Cache the result for 100ms
 	t.cellSize.size = size
 	t.cellSize.expire = time.Now().Add(100 * time.Millisecond)
 
