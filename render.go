@@ -50,7 +50,11 @@ func (r *render) moveCursor() {
 }
 
 func (t *Terminal) refreshCursor() {
-	t.cursor.Hidden = !t.focused || t.cursorHidden
+	// Hide if we don't have focus or cursor hidden flag is set, blink handling may toggle Hidden too.
+	hidden := !t.focused || t.cursorHidden
+	t.cursor.Hidden = hidden
+
+	// Base color selection (bell overrides)
 	if t.bell {
 		t.cursor.FillColor = theme.Color(theme.ColorNameError)
 	} else {
@@ -66,7 +70,7 @@ func (t *Terminal) refreshCursor() {
 		}
 	}
 
-	// Determine cursor width based on shape
+	// Determine cursor width/height based on shape
 	cellSize := t.guessCellSize()
 	var width float32
 	if t.cursorShape == "caret" {
@@ -75,8 +79,54 @@ func (t *Terminal) refreshCursor() {
 		// Default to block cursor
 		width = cellSize.Width
 	}
-
 	t.cursor.Resize(fyne.NewSize(width, cellSize.Height))
+
+	// Cursor visual adjustments:
+	// - For caret: solid thin bar
+	// - For block: semi-transparent fill so text remains visible beneath, giving an invert-like emphasis
+	if t.cursorShape == "caret" {
+		// Solid caret, ensure full opacity
+		if col, ok := t.cursor.FillColor.(color.NRGBA); ok {
+			col.A = 0xFF
+			t.cursor.FillColor = col
+		} else if col, ok := t.cursor.FillColor.(color.RGBA); ok {
+			col.A = 0xFF
+			t.cursor.FillColor = col
+		}
+		t.cursor.StrokeColor = color.Transparent
+		t.cursor.StrokeWidth = 0
+	} else {
+		// Block: translucent overlay + subtle outline to keep glyphs readable
+		primary := t.cursor.FillColor
+		switch c := primary.(type) {
+		case color.NRGBA:
+			if c.A > 0x88 {
+				c.A = 0x88
+			}
+			t.cursor.FillColor = c
+		case color.RGBA:
+			if c.A > 0x88 {
+				c.A = 0x88
+			}
+			t.cursor.FillColor = c
+		default:
+			// Fallback: use theme primary with ~50% alpha
+			pc := theme.Color(theme.ColorNamePrimary)
+			if col, ok := pc.(color.NRGBA); ok {
+				col.A = 0x88
+				t.cursor.FillColor = col
+			} else if col, ok := pc.(color.RGBA); ok {
+				col.A = 0x88
+				t.cursor.FillColor = col
+			}
+		}
+		t.cursor.StrokeColor = theme.Color(theme.ColorNamePrimary)
+		t.cursor.StrokeWidth = 1
+	}
+
+	// Ensure blinking is active/paused based on current state
+	t.ensureCursorBlinking()
+
 	fyne.Do(func() {
 		t.cursor.Refresh()
 	})

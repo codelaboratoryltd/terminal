@@ -27,8 +27,6 @@ const (
 	highlightBitMask = 0x55
 )
 
-// Config is the state of a terminal, updated upon certain actions or commands.
-// Use Terminal.OnConfigure hook to register for changes.
 type Config struct {
 	Title         string
 	Rows, Columns uint
@@ -42,7 +40,6 @@ const (
 	charSetAlternate
 )
 
-// Terminal is a terminal widget that loads a shell and handles input/output.
 type Terminal struct {
 	widget.BaseWidget
 	fyne.ShortcutHandler
@@ -103,6 +100,10 @@ type Terminal struct {
 		size   fyne.Size
 		expire time.Time
 	}
+
+	// Cursor blinking management
+	cursorBlinkCancel context.CancelFunc
+	cursorBlinkOn     bool // internal toggle to track blink state
 }
 
 // Printer is used for spooling print data when its received.
@@ -644,5 +645,81 @@ func (t *Terminal) SetCursorShape(shape string) {
 	t.cursorShape = shape
 	if t.cursor != nil {
 		t.refreshCursor()
+	}
+}
+
+// Focus management to start/stop cursor blinking.
+func (t *Terminal) FocusGained() {
+	t.focused = true
+	t.ensureCursorBlinking()
+	t.Refresh()
+}
+
+func (t *Terminal) FocusLost() {
+	t.focused = false
+	t.stopCursorBlink()
+	if t.cursor != nil {
+		t.cursor.Hidden = true
+	}
+	t.Refresh()
+}
+
+// ensureCursorBlinking toggles the blinking loop based on visibility/focus and shape.
+func (t *Terminal) ensureCursorBlinking() {
+	// Blink when focused and cursor is not permanently hidden.
+	shouldBlink := t.focused && !t.cursorHidden
+
+	if !shouldBlink {
+		t.stopCursorBlink()
+		return
+	}
+
+	// Start if not running
+	if t.cursorBlinkCancel == nil {
+		t.startCursorBlink()
+	}
+}
+
+func (t *Terminal) startCursorBlink() {
+	if t.cursorBlinkCancel != nil {
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.cursorBlinkCancel = cancel
+	interval := 500 * time.Millisecond
+	t.cursorBlinkOn = true
+
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				// Toggle visibility
+				t.cursorBlinkOn = !t.cursorBlinkOn
+				if t.cursor != nil {
+					// Only toggle if still appropriate to blink
+					if t.focused && !t.cursorHidden {
+						t.cursor.Hidden = !t.cursorBlinkOn
+						fyne.Do(func() {
+							t.cursor.Refresh()
+						})
+					}
+				}
+			}
+		}
+	}()
+}
+
+func (t *Terminal) stopCursorBlink() {
+	if t.cursorBlinkCancel != nil {
+		t.cursorBlinkCancel()
+		t.cursorBlinkCancel = nil
+	}
+	// Ensure cursor is shown when we stop blinking (if focused state would want it)
+	if t.cursor != nil {
+		t.cursor.Hidden = !t.focused || t.cursorHidden
 	}
 }

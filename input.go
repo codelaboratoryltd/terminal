@@ -160,12 +160,6 @@ func (t *Terminal) KeyUp(e *fyne.KeyEvent) {
 	t.trackKeyboardState(false, e)
 }
 
-// FocusGained notifies the terminal that it has focus
-func (t *Terminal) FocusGained() {
-	t.focused = true
-	t.Refresh()
-}
-
 // TypedShortcut handles key combinations, we pass them on to the tty.
 func (t *Terminal) TypedShortcut(s fyne.Shortcut) {
 	if ds, ok := s.(*desktop.CustomShortcut); ok {
@@ -211,12 +205,6 @@ func (t *Terminal) TypedShortcut(s fyne.Shortcut) {
 
 		}
 	}
-}
-
-// FocusLost tells the terminal it no longer has focus
-func (t *Terminal) FocusLost() {
-	t.focused = false
-	t.Refresh()
 }
 
 // Focused is used to determine if this terminal currently has focus
