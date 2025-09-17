@@ -66,6 +66,7 @@ type Terminal struct {
 
 	cursor                   *canvas.Rectangle
 	cursorHidden, bufferMode bool   // buffer mode is an xterm extension that impacts control keys
+	applicationCursorKeys    bool   // DECCKM: application cursor key mode
 	cursorShape              string // "block" or "caret"
 	cursorMoved              func()
 
@@ -95,6 +96,15 @@ type Terminal struct {
 	readWriterConfigurator ReadWriterConfigurator
 	keyRemap               map[fyne.KeyName]fyne.KeyName
 
+	// xterm modes/buffers
+	wrapAround  bool // DECSET 7
+	wrapPending bool // deferred wrap pending flag
+	originMode  bool // DECOM: origin mode (CUP relative to scroll region)
+	// Saved main screen buffer for DECSET 47/1049
+	savedRows      []widget.TextGridRow
+	savedCursorRow int
+	savedCursorCol int
+
 	cellSize struct {
 		text   *canvas.Text
 		size   fyne.Size
@@ -104,6 +114,9 @@ type Terminal struct {
 	// Cursor blinking management
 	cursorBlinkCancel context.CancelFunc
 	cursorBlinkOn     bool // internal toggle to track blink state
+
+	// Mouse reporting modes
+	mouseSGR bool // DECSET 1006
 }
 
 // Printer is used for spooling print data when its received.
@@ -544,6 +557,7 @@ func New() *Terminal {
 		keyRemap:    map[fyne.KeyName]fyne.KeyName{},
 		oscHandlers: make(map[int]func(string)),
 		cursorShape: "block", // Default to block cursor
+		wrapAround:  true,    // xterm default
 	}
 	t.ExtendBaseWidget(t)
 

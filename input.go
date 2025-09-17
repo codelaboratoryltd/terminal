@@ -214,7 +214,7 @@ func (t *Terminal) Focused() bool {
 
 func (t *Terminal) typeCursorKey(key fyne.KeyName) {
 	cursorPrefix := byte('[')
-	if t.bufferMode {
+	if t.applicationCursorKeys {
 		cursorPrefix = 'O'
 	}
 

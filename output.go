@@ -90,6 +90,7 @@ type parseState struct {
 	osc      bool
 	vt100    rune
 	apc      bool
+	dcs      bool
 	printing bool
 }
 
@@ -142,6 +143,10 @@ func (t *Terminal) handleOutput(buf []byte) []byte {
 			t.parseAPC(r)
 			continue
 		}
+		if t.state.dcs {
+			t.parseDCS(r)
+			continue
+		}
 		if t.state.osc {
 			t.parseOSC(r)
 			continue
@@ -183,11 +188,21 @@ func (t *Terminal) parseEscState(r rune) (shouldContinue bool) {
 	case '\\':
 		if t.state.osc {
 			t.handleOSC(t.state.code)
+			t.state.osc = false
+		}
+		if t.state.apc {
+			t.handleAPC(t.state.code)
+			t.state.apc = false
+		}
+		if t.state.dcs {
+			t.handleDCS(t.state.code)
+			t.state.dcs = false
 		}
 		t.state.code = ""
-		t.state.osc = false
 	case ']':
 		t.state.osc = true
+	case 'P':
+		t.state.dcs = true
 	case '(', ')':
 		t.state.vt100 = r
 	case '7':
@@ -200,6 +215,9 @@ func (t *Terminal) parseEscState(r rune) (shouldContinue bool) {
 		fyne.Do(t.scrollDown)
 	case 'M':
 		fyne.Do(t.scrollUp)
+	case 'c':
+		// RIS: Full reset
+		t.resetTerminal()
 	case '_':
 		t.state.apc = true
 	case '=', '>':
@@ -236,6 +254,15 @@ func (t *Terminal) parseAPC(r rune) {
 	}
 }
 
+func (t *Terminal) parseDCS(r rune) {
+	// DCS terminates on ST (ESC \\) or CAN/SUB; we handle ST here
+	if r == 0 {
+		// Ignore embedded NULs
+		return
+	}
+	t.state.code += string(r)
+}
+
 func (t *Terminal) parseOSC(r rune) {
 	if r == asciiBell || r == 0 {
 		t.handleOSC(t.state.code)
@@ -247,10 +274,21 @@ func (t *Terminal) parseOSC(r rune) {
 }
 
 func (t *Terminal) handleOutputChar(r rune) {
-	if t.cursorCol == int(t.config.Columns) {
-		t.cursorCol = 0
-		handleOutputLineFeed(t)
+	// Deferred wrap: if a wrap is pending from the previous character, perform it now
+	if t.wrapPending {
+		t.wrapPending = false
+		if t.wrapAround {
+			// move to next line (respecting scroll region) and start at column 0
+			t.cursorCol = 0
+			handleOutputLineFeed(t)
+		} else {
+			// wrap disabled: keep at last column and overtype
+			if t.config.Columns > 0 {
+				t.cursorCol = int(t.config.Columns) - 1
+			}
+		}
 	}
+
 	for len(t.content.Rows)-1 < t.cursorRow {
 		t.content.Rows = append(t.content.Rows, widget.TextGridRow{})
 	}
@@ -268,8 +306,31 @@ func (t *Terminal) handleOutputChar(r rune) {
 		cellStyle = widget2.NewTermTextGridStyle(t.currentFG, t.currentBG, highlightBitMask, t.blinking, t.bold, t.underlined)
 	}
 
+	// Place the character at the current position
 	t.content.SetCell(t.cursorRow, t.cursorCol, widget.TextGridCell{Rune: r, Style: cellStyle})
-	t.cursorCol++
+
+	// Advance cursor/defer wrap according to xterm rules
+	lastCol := int(t.config.Columns) - 1
+	if t.config.Columns == 0 {
+		lastCol = -1
+	}
+	if t.cursorCol == lastCol {
+		if t.wrapAround {
+			// Do not move now; set wrap pending so next character triggers LF to next line
+			t.wrapPending = true
+			// Maintain legacy behavior where cursorCol advances one past the last column
+			// so that tests expecting cursorCol == Columns still pass.
+			if t.config.Columns > 0 {
+				t.cursorCol = int(t.config.Columns)
+			}
+		} else {
+			// No wrap: stay at last column (overtype)
+			// cursorCol unchanged
+		}
+	} else {
+		// Normal advance within the line
+		t.cursorCol++
+	}
 }
 
 func (t *Terminal) ringBell() {

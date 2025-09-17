@@ -23,13 +23,16 @@ var escapes = map[rune]func(*Terminal, string){
 	'h': escapePrivateModeOn,
 	'L': escapeInsertLines,
 	'l': escapePrivateModeOff,
+	// Note: 'h'/'l' without '?' are SM/RM; we'll handle '20h/20l' etc.
 	'm': escapeColorMode,
+	'n': escapeDeviceStatusReport,
 	'J': escapeEraseInScreen,
 	'K': escapeEraseInLine,
 	'P': escapeDeleteChars,
 	'r': escapeSetScrollArea,
 	's': escapeSaveCursor,
 	'S': escapeScrollUp,
+	'T': escapeScrollDown,
 	'u': escapeRestoreCursor,
 	'i': escapePrinterMode,
 	'c': escapeDeviceAttribute,
@@ -108,6 +111,48 @@ func (t *Terminal) handleVT100(code string) {
 	}
 }
 
+// resetTerminal performs a full reset equivalent to RIS (ESC c)
+func (t *Terminal) resetTerminal() {
+	// Clear modes
+	t.wrapAround = true
+	t.wrapPending = false
+	t.newLineMode = false
+	t.cursorHidden = false
+	t.applicationCursorKeys = false
+	t.onMouseDown = nil
+	t.onMouseUp = nil
+
+	// Reset attributes
+	t.currentBG = nil
+	t.currentFG = nil
+	t.bold = false
+	t.blinking = false
+	t.underlined = false
+
+	// Reset charsets
+	t.g0Charset = charSetANSII
+	t.g1Charset = charSetANSII
+	t.useG1CharSet = false
+
+	// Reset scroll region
+	t.scrollTop = 0
+	if t.config.Rows > 0 {
+		t.scrollBottom = int(t.config.Rows) - 1
+	}
+
+	// Reset buffers to main screen
+	if t.savedRows != nil {
+		t.savedRows = nil
+	}
+	t.bufferMode = false
+
+	// Reset cursor position
+	t.moveCursor(0, 0)
+
+	// Clear screen
+	t.clearScreen()
+}
+
 func (t *Terminal) moveCursor(row, col int) {
 	if t.config.Columns == 0 || t.config.Rows == 0 {
 		return
@@ -123,6 +168,9 @@ func (t *Terminal) moveCursor(row, col int) {
 	} else if row >= int(t.config.Rows) {
 		row = int(t.config.Rows) - 1
 	}
+
+	// Any explicit cursor movement clears a pending wrap, per xterm deferred-wrap rules
+	t.wrapPending = false
 
 	t.cursorCol = col
 	t.cursorRow = row
@@ -257,7 +305,12 @@ func escapeMoveCursorLeft(t *Terminal, msg string) {
 
 func escapeMoveCursorRow(t *Terminal, msg string) {
 	row, _ := strconv.Atoi(msg)
-	t.moveCursor(row-1, t.cursorCol)
+	if t.originMode {
+		base := t.scrollTop
+		t.moveCursor(base+(row-1), t.cursorCol)
+	} else {
+		t.moveCursor(row-1, t.cursorCol)
+	}
 }
 
 func escapeMoveCursorCol(t *Terminal, msg string) {
@@ -269,16 +322,27 @@ func escapePrivateMode(t *Terminal, msg string, enable bool) {
 	modes := strings.Split(msg, ";")
 	for _, mode := range modes {
 		switch mode {
+		case "1":
+			// DECCKM: Application Cursor Keys
+			t.applicationCursorKeys = enable
 		case "7":
-			//TODO wrap around mode
-			if t.debug {
-				log.Println("Wrap around mode not supported")
-			}
+			// Autowrap mode (DECSET/DECRST 7)
+			t.wrapAround = enable
+		case "6":
+			// DECOM: Origin mode
+			t.originMode = enable
 		case "20":
 			t.newLineMode = enable
 		case "25":
 			t.cursorHidden = !enable
 			t.refreshCursor()
+		case "1048":
+			// Save/restore cursor only
+			if enable {
+				t.savedCursorRow, t.savedCursorCol = t.cursorRow, t.cursorCol
+			} else {
+				t.moveCursor(t.savedCursorRow, t.savedCursorCol)
+			}
 		case "9":
 			if enable {
 				t.onMouseDown = t.handleMouseDownX10
@@ -295,22 +359,51 @@ func escapePrivateMode(t *Terminal, msg string, enable bool) {
 				t.onMouseDown = nil
 				t.onMouseUp = nil
 			}
+		case "1006":
+			t.mouseSGR = enable
 		case "1049":
-			t.bufferMode = enable
+			// 1049 = 1047 + 1048
+			if enable {
+				// save cursor, then switch to alt buffer
+				t.savedCursorRow, t.savedCursorCol = t.cursorRow, t.cursorCol
+			}
+			// behave like 47 around buffers
+			fallthrough
+		case "47":
+			if enable {
+				// Save current screen and switch to alternate (clear)
+				if t.savedRows == nil {
+					rows := make([]widget.TextGridRow, len(t.content.Rows))
+					for i, row := range t.content.Rows {
+						cells := make([]widget.TextGridCell, len(row.Cells))
+						copy(cells, row.Cells)
+						rows[i] = widget.TextGridRow{Cells: cells}
+					}
+					t.savedRows = rows
+					t.savedCursorRow, t.savedCursorCol = t.cursorRow, t.cursorCol
+				}
+				// clear to alternate buffer
+				t.content.Rows = []widget.TextGridRow{}
+				t.moveCursor(0, 0)
+				t.content.Refresh()
+			} else {
+				// Restore saved screen
+				if t.savedRows != nil {
+					rows := make([]widget.TextGridRow, len(t.savedRows))
+					for i, row := range t.savedRows {
+						cells := make([]widget.TextGridCell, len(row.Cells))
+						copy(cells, row.Cells)
+						rows[i] = widget.TextGridRow{Cells: cells}
+					}
+					t.content.Rows = rows
+					// if 1049 was set, we also restore cursor
+					t.moveCursor(t.savedCursorRow, t.savedCursorCol)
+					t.savedRows = nil
+					t.content.Refresh()
+				}
+			}
 		case "2004":
 			t.bracketedPasteMode = enable
-		case "47":
-			// TODO save screen
-			if t.debug {
-				log.Println("Save screen mode not supported")
-			}
-			/*
-				if enable {
-					// save screen
-				} else {
-					// restore screen
-				}
-			*/
 		default:
 			m := "l"
 			if enable {
@@ -324,11 +417,39 @@ func escapePrivateMode(t *Terminal, msg string, enable bool) {
 }
 
 func escapePrivateModeOff(t *Terminal, msg string) {
-	escapePrivateMode(t, msg[1:], false)
+	if strings.HasPrefix(msg, "?") {
+		escapePrivateMode(t, msg[1:], false)
+		return
+	}
+	escapeMode(t, msg, false)
 }
 
 func escapePrivateModeOn(t *Terminal, msg string) {
-	escapePrivateMode(t, msg[1:], true)
+	if strings.HasPrefix(msg, "?") {
+		escapePrivateMode(t, msg[1:], true)
+		return
+	}
+	escapeMode(t, msg, true)
+}
+
+// escapeMode handles standard SM/RM (without the DEC private '?' prefix)
+func escapeMode(t *Terminal, msg string, enable bool) {
+	modes := strings.Split(msg, ";")
+	for _, mode := range modes {
+		switch mode {
+		case "20":
+			// LNM: New Line Mode
+			t.newLineMode = enable
+		default:
+			if t.debug {
+				m := 'l'
+				if enable {
+					m = 'h'
+				}
+				log.Println("Unknown SM/RM code", mode+string(m))
+			}
+		}
+	}
 }
 
 func escapeMoveCursor(t *Terminal, msg string) {
@@ -343,8 +464,13 @@ func escapeMoveCursor(t *Terminal, msg string) {
 	if len(parts) == 2 {
 		col, _ = strconv.Atoi(parts[1])
 	}
-
-	t.moveCursor(row-1, col-1)
+	// Respect DECOM: if origin mode, positions are relative to scroll region
+	if t.originMode {
+		base := t.scrollTop
+		t.moveCursor(base+(row-1), (col - 1))
+	} else {
+		t.moveCursor(row-1, col-1)
+	}
 }
 
 func escapeRestoreCursor(t *Terminal, s string) {
@@ -411,6 +537,46 @@ func escapeScrollUp(t *Terminal, msg string) {
 	}
 }
 
+// CSI T: Scroll down (reverse index in region by N lines)
+func escapeScrollDown(t *Terminal, msg string) {
+	lines, _ := strconv.Atoi(msg)
+	if lines == 0 {
+		lines = 1
+	}
+	for i := t.scrollBottom; i >= t.scrollTop+lines; i-- {
+		t.content.SetRow(i, t.content.Row(i-lines))
+	}
+	for i := t.scrollTop; i < t.scrollTop+lines && i <= t.scrollBottom; i++ {
+		t.content.SetRow(i, widget.TextGridRow{})
+	}
+}
+
+// escapeDeviceStatusReport handles CSI ... n queries
+// Supports 5n (status) and 6n (cursor position)
+func escapeDeviceStatusReport(t *Terminal, msg string) {
+	// msg can be a single number like "5" or "6"
+	if msg == "5" {
+		// Device Status Report: ready
+		_, _ = t.in.Write([]byte{asciiEscape, '[', '0', 'n'})
+		return
+	}
+	if msg == "6" {
+		// Cursor position report: 1-based row;col
+		row := t.cursorRow + 1
+		col := t.cursorCol + 1
+		resp := []byte{asciiEscape, '['}
+		resp = append(resp, []byte(strconv.Itoa(row))...)
+		resp = append(resp, ';')
+		resp = append(resp, []byte(strconv.Itoa(col))...)
+		resp = append(resp, 'R')
+		_, _ = t.in.Write(resp)
+		return
+	}
+	if t.debug {
+		log.Println("Unhandled DSR", msg)
+	}
+}
+
 func trimLeftZeros(s string) string {
 	if s == "" {
 		return s
@@ -455,12 +621,13 @@ func escapeDeviceAttribute(t *Terminal, code string) {
 		return
 	}
 
-	if t.debug {
-		switch code[0] {
-		case '>':
-			log.Println("Unhandled secondary device attribute", code[1])
-		case '=':
-			log.Println("Unhandled tertiary device attribute", code[1])
-		}
+	// Respond to primary/secondary DA queries conservatively
+	switch code[0] {
+	case '>':
+		// DA2: Identify terminal type/version. Reply as xterm-256color-ish: CSI > 0 ; 115 ; 0 c
+		_, _ = t.in.Write([]byte{asciiEscape, '[', '>', '0', ';', '1', '1', '5', ';', '0', 'c'})
+	default:
+		// DA1: Report VT220 (CSI ? 1 ; 2 c would be explicit). Use simple VT220 response: CSI ? 6 c
+		_, _ = t.in.Write([]byte{asciiEscape, '[', '?', '6', 'c'})
 	}
 }
