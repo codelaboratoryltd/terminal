@@ -8,6 +8,7 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/widget"
+	widget2 "github.com/fyne-io/terminal/internal/widget"
 )
 
 var escapes = map[rune]func(*Terminal, string){
@@ -53,8 +54,17 @@ func (t *Terminal) handleEscape(code string) {
 }
 
 func (t *Terminal) clearScreen() {
+	width := int(t.config.Columns)
+	rows := int(t.config.Rows)
+	blankCell := widget.TextGridCell{Rune: ' ', Style: widget2.NewTermTextGridStyle(t.currentFG, t.currentBG, highlightBitMask, t.blinking, t.bold, t.underlined)}
+	for i := 0; i < rows; i++ {
+		line := make([]widget.TextGridCell, width)
+		for j := range line {
+			line[j] = blankCell
+		}
+		t.content.SetRow(i, widget.TextGridRow{Cells: line})
+	}
 	t.moveCursor(0, 0)
-	t.clearScreenFromCursor()
 }
 
 func (t *Terminal) clearScreenFromCursor() {
@@ -63,29 +73,68 @@ func (t *Terminal) clearScreenFromCursor() {
 	if t.cursorCol > len(row.Cells) {
 		from = len(row.Cells)
 	}
+	// Build a full-width row: keep left segment, blank the rest
+	width := int(t.config.Columns)
+	blankCell := widget.TextGridCell{Rune: ' ', Style: widget2.NewTermTextGridStyle(t.currentFG, t.currentBG, highlightBitMask, t.blinking, t.bold, t.underlined)}
+	left := []widget.TextGridCell{}
 	if from > 0 {
-		t.content.SetRow(t.cursorRow, widget.TextGridRow{Cells: row.Cells[:from]})
-	} else {
-		t.content.SetRow(t.cursorRow, widget.TextGridRow{})
+		left = row.Cells[:from]
 	}
+	rightLen := 0
+	if width > from {
+		rightLen = width - from
+	}
+	right := make([]widget.TextGridCell, rightLen)
+	for i := range right {
+		right[i] = blankCell
+	}
+	t.content.SetRow(t.cursorRow, widget.TextGridRow{Cells: append(append([]widget.TextGridCell{}, left...), right...)})
 
-	for i := t.cursorRow + 1; i < len(t.content.Rows); i++ {
-		t.content.SetRow(i, widget.TextGridRow{})
+	// Clear following rows to full-width blanks
+	for i := t.cursorRow + 1; i < int(t.config.Rows); i++ {
+		line := make([]widget.TextGridCell, width)
+		for j := range line {
+			line[j] = blankCell
+		}
+		t.content.SetRow(i, widget.TextGridRow{Cells: line})
 	}
 }
 
 func (t *Terminal) clearScreenToCursor() {
 	row := t.content.Row(t.cursorRow)
-	cells := make([]widget.TextGridCell, t.cursorCol)
+	width := int(t.config.Columns)
+	blankCell := widget.TextGridCell{Rune: ' ', Style: widget2.NewTermTextGridStyle(t.currentFG, t.currentBG, highlightBitMask, t.blinking, t.bold, t.underlined)}
+
+	// Keep right segment (from cursor), blank left up to cursor, and pad to full width
+	right := []widget.TextGridCell{}
 	if t.cursorCol < len(row.Cells) {
-		cells = append(cells, row.Cells[t.cursorCol:]...)
+		right = row.Cells[t.cursorCol:]
+	}
+	combined := make([]widget.TextGridCell, 0, width)
+	leftBlanks := t.cursorCol
+	if leftBlanks > width {
+		leftBlanks = width
+	}
+	for j := 0; j < leftBlanks; j++ {
+		combined = append(combined, blankCell)
+	}
+	combined = append(combined, right...)
+	if len(combined) < width {
+		tail := make([]widget.TextGridCell, width-len(combined))
+		for j := range tail {
+			tail[j] = blankCell
+		}
+		combined = append(combined, tail...)
 	}
 
 	fyne.Do(func() {
-		t.content.SetRow(t.cursorRow, widget.TextGridRow{Cells: cells})
-
-		for i := 0; i < t.cursorRow-1; i++ {
-			t.content.SetRow(i, widget.TextGridRow{})
+		t.content.SetRow(t.cursorRow, widget.TextGridRow{Cells: combined})
+		for i := 0; i < t.cursorRow; i++ {
+			line := make([]widget.TextGridCell, width)
+			for j := range line {
+				line[j] = blankCell
+			}
+			t.content.SetRow(i, widget.TextGridRow{Cells: line})
 		}
 	})
 }
@@ -235,6 +284,18 @@ func escapeEraseInScreen(t *Terminal, msg string) {
 		t.clearScreenToCursor()
 	case 2:
 		t.clearScreen()
+	case 3:
+		// xterm extension: Erase saved lines (scrollback). We also clear the
+		// visible screen to ensure consistent behavior inside/outside tmux.
+		t.content.Rows = []widget.TextGridRow{}
+		t.scrollTop = 0
+		if t.config.Rows > 0 {
+			t.scrollBottom = int(t.config.Rows) - 1
+		} else {
+			t.scrollBottom = 0
+		}
+		t.moveCursor(0, 0)
+		t.content.Refresh()
 	}
 }
 
