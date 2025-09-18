@@ -257,24 +257,60 @@ func escapeEraseInLine(t *Terminal, msg string) {
 	mode, _ := strconv.Atoi(msg)
 	switch mode {
 	case 0:
+		// Erase to end-of-line: fill with blanks to configured width using current SGR
 		row := t.content.Row(t.cursorRow)
-		if t.cursorCol >= len(row.Cells) {
-			return
+		width := int(t.config.Columns)
+		if width == 0 {
+			width = len(row.Cells)
 		}
-		t.content.SetRow(t.cursorRow, widget.TextGridRow{Cells: row.Cells[:t.cursorCol]})
+		blank := widget.TextGridCell{Rune: ' ', Style: widget2.NewTermTextGridStyle(t.currentFG, t.currentBG, highlightBitMask, t.blinking, t.bold, t.underlined)}
+		cells := row.Cells
+		if len(cells) < width {
+			pad := make([]widget.TextGridCell, width-len(cells))
+			for i := range pad {
+				pad[i] = blank
+			}
+			cells = append(append([]widget.TextGridCell{}, cells...), pad...)
+		} else {
+			cells = append([]widget.TextGridCell{}, cells...)
+		}
+		for i := t.cursorCol; i < width; i++ {
+			cells[i] = blank
+		}
+		t.content.SetRow(t.cursorRow, widget.TextGridRow{Cells: cells[:width]})
 	case 1:
+		// Erase from start to cursor: fill leading area with blanks
 		row := t.content.Row(t.cursorRow)
-		if t.cursorCol >= len(row.Cells) {
-			return
+		width := int(t.config.Columns)
+		if width == 0 {
+			width = len(row.Cells)
 		}
-		cells := make([]widget.TextGridCell, t.cursorCol)
-		t.content.SetRow(t.cursorRow, widget.TextGridRow{Cells: append(cells, row.Cells[t.cursorCol:]...)})
+		blank := widget.TextGridCell{Rune: ' ', Style: widget2.NewTermTextGridStyle(t.currentFG, t.currentBG, highlightBitMask, t.blinking, t.bold, t.underlined)}
+		cells := row.Cells
+		if len(cells) < width {
+			pad := make([]widget.TextGridCell, width-len(cells))
+			for i := range pad {
+				pad[i] = blank
+			}
+			cells = append(append([]widget.TextGridCell{}, cells...), pad...)
+		} else {
+			cells = append([]widget.TextGridCell{}, cells...)
+		}
+		for i := 0; i <= t.cursorCol && i < width; i++ {
+			cells[i] = blank
+		}
+		t.content.SetRow(t.cursorRow, widget.TextGridRow{Cells: cells[:width]})
 	case 2:
-		row := t.content.Row(t.cursorRow)
-		if t.cursorCol >= len(row.Cells) {
-			return
+		// Erase entire line: fill with blanks across configured width
+		width := int(t.config.Columns)
+		if width == 0 {
+			width = len(t.content.Row(t.cursorRow).Cells)
 		}
-		cells := make([]widget.TextGridCell, len(row.Cells))
+		blank := widget.TextGridCell{Rune: ' ', Style: widget2.NewTermTextGridStyle(t.currentFG, t.currentBG, highlightBitMask, t.blinking, t.bold, t.underlined)}
+		cells := make([]widget.TextGridCell, width)
+		for i := range cells {
+			cells[i] = blank
+		}
 		t.content.SetRow(t.cursorRow, widget.TextGridRow{Cells: cells})
 	}
 }
@@ -286,14 +322,29 @@ func escapeEraseChars(t *Terminal, msg string) {
 		n = 1
 	}
 	row := t.content.Row(t.cursorRow)
-	end := t.cursorCol + n
-	if end > len(row.Cells) {
-		end = len(row.Cells)
+	width := int(t.config.Columns)
+	if width == 0 {
+		width = len(row.Cells)
 	}
 	blank := widget.TextGridCell{Rune: ' ', Style: widget2.NewTermTextGridStyle(t.currentFG, t.currentBG, highlightBitMask, t.blinking, t.bold, t.underlined)}
-	for i := t.cursorCol; i < end; i++ {
-		t.content.SetCell(t.cursorRow, i, blank)
+	cells := row.Cells
+	if len(cells) < width {
+		pad := make([]widget.TextGridCell, width-len(cells))
+		for i := range pad {
+			pad[i] = blank
+		}
+		cells = append(append([]widget.TextGridCell{}, cells...), pad...)
+	} else {
+		cells = append([]widget.TextGridCell{}, cells...)
 	}
+	end := t.cursorCol + n
+	if end > width {
+		end = width
+	}
+	for i := t.cursorCol; i < end; i++ {
+		cells[i] = blank
+	}
+	t.content.SetRow(t.cursorRow, widget.TextGridRow{Cells: cells[:width]})
 }
 
 func escapeEraseInScreen(t *Terminal, msg string) {

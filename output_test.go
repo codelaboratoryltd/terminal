@@ -2,6 +2,7 @@ package terminal
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 
 	"fyne.io/fyne/v2"
@@ -14,12 +15,12 @@ func TestTerminal_Backspace(t *testing.T) {
 	term.Resize(fyne.NewSize(50, 50))
 	term.CreateRenderer() // ensure content is initialized
 	term.handleOutput([]byte("Hi"))
-	assert.Equal(t, "Hi", term.content.Text())
+	assert.Equal(t, "Hi", strings.TrimRight(term.content.Text(), " \n"))
 
 	term.handleOutput([]byte{asciiBackspace})
 	term.handleOutput([]byte("ello"))
 
-	assert.Equal(t, "Hello", term.content.Text())
+	assert.Equal(t, "Hello", strings.TrimRight(term.content.Text(), " \n"))
 }
 
 func TestTerminal_Autowrap_Enabled(t *testing.T) {

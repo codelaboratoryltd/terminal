@@ -55,15 +55,22 @@ func TestScrollBack_Tmux(t *testing.T) {
 	term.handleOutput([]byte("\x1b[m"))     // Reset all attributes
 
 	// Step 5: Check the final content of the terminal
-	expectedContent := "" // After scrolling and clearing, the visible area should be empty
+	// After scrolling and clearing, rows should be visually empty. EL may leave spaces, so trim trailing spaces.
+	expectedContent := "" // visually empty lines
 	for i := 0; i < 46; i++ {
-		expectedContent += "\n" // Each row should be an empty line
+		expectedContent += "\n"
 	}
 
 	assert.Equal(t, 0, term.cursorRow)
 	assert.Equal(t, 0, term.cursorCol)
 
-	assert.Equal(t, expectedContent, term.content.Text())
+	// Trim trailing spaces from each line before comparison
+	lines := strings.Split(term.content.Text(), "\n")
+	for i := range lines {
+		lines[i] = strings.TrimRight(lines[i], " ")
+	}
+	got := strings.Join(lines, "\n")
+	assert.Equal(t, expectedContent, got)
 }
 
 func TestScrollBack_With_Zero_Back_Buffer(t *testing.T) {
@@ -145,7 +152,8 @@ func TestEraseLine(t *testing.T) {
 
 	term.moveCursor(0, 2)
 	term.handleEscape("K")
-	assert.Equal(t, "He", term.content.Text())
+	// EL fills to end-of-line with blanks; ignore trailing spaces in comparison
+	assert.Equal(t, "He", strings.TrimRight(term.content.Text(), " \n"))
 }
 
 func TestCursorMove(t *testing.T) {
