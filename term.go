@@ -117,6 +117,9 @@ type Terminal struct {
 
 	// Mouse reporting modes
 	mouseSGR bool // DECSET 1006
+
+	// Optional tracing of incoming PTY bytes for debugging
+	trace io.Writer
 }
 
 // Printer is used for spooling print data when its received.
@@ -563,6 +566,14 @@ func New() *Terminal {
 		wrapAround:  true,    // xterm default
 	}
 	t.ExtendBaseWidget(t)
+
+	// Enable raw byte tracing if requested via environment
+	if os.Getenv("FYNE_TERM_TRACE") != "" {
+		f, err := os.OpenFile("/tmp/fyneterm-trace.log", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+		if err == nil {
+			t.trace = f
+		}
+	}
 
 	return t
 }

@@ -83,11 +83,12 @@ func TestScrollBack_With_Zero_Back_Buffer(t *testing.T) {
 		expectedCursorCol int
 	}{
 		"when 5 lines added and scrolled up 4 lines, should show line 5": {
-			linesToAdd:        5,
-			scrollLines:       4,
-			expectedOutput:    "Line 5",
-			expectedCursorRow: 0, // Adjust as needed
-			expectedCursorCol: 6, // Assuming cursor is at end of visible text
+			linesToAdd:     5,
+			scrollLines:    4,
+			expectedOutput: "Line 5",
+			// After DECSTBM, cursor moves to top margin (home). SU leaves cursor unchanged.
+			expectedCursorRow: 0,
+			expectedCursorCol: 0,
 		},
 		// Add more test cases here as needed
 	}

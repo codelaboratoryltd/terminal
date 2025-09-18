@@ -663,7 +663,12 @@ func escapeMode(t *Terminal, msg string, enable bool) {
 
 func escapeMoveCursor(t *Terminal, msg string) {
 	if !strings.Contains(msg, ";") {
-		t.moveCursor(0, 0)
+		// CUP default is row=1,col=1, honor origin mode
+		if t.originMode {
+			t.moveCursor(t.scrollTop, 0)
+		} else {
+			t.moveCursor(0, 0)
+		}
 		return
 	}
 
@@ -714,6 +719,8 @@ func escapeSetScrollArea(t *Terminal, msg string) {
 
 	t.scrollTop = start
 	t.scrollBottom = end
+	// xterm/VT: After setting margins, cursor moves to home and origin mode applies to CUP
+	t.moveCursor(t.scrollTop, 0)
 }
 
 func escapeScrollUp(t *Terminal, msg string) {
@@ -721,29 +728,14 @@ func escapeScrollUp(t *Terminal, msg string) {
 	if lines == 0 {
 		lines = 1
 	}
-
-	// Calculate the new cursor position after scrolling
-	newCursorRow := t.cursorRow - lines
-	// Make sure we never end up negative cursor row
-	if newCursorRow < 0 {
-		newCursorRow = 0
-	}
-
-	// Make sure we don't scroll above the scroll top
-	if newCursorRow < t.scrollTop {
-		newCursorRow = t.scrollTop
-	}
-
-	// Move the cursor to the new position
-	t.moveCursor(newCursorRow, t.cursorCol)
-
-	// Perform the actual scrolling action
+	// CSI S scrolls the page up within the scroll region
 	for i := t.scrollTop; i <= t.scrollBottom-lines; i++ {
 		t.content.SetRow(i, t.content.Row(i+lines))
 	}
 	for i := t.scrollBottom - lines + 1; i <= t.scrollBottom; i++ {
-		t.content.SetRow(i, widget.TextGridRow{}) // Clear the last lines
+		t.content.SetRow(i, widget.TextGridRow{})
 	}
+	// Cursor remains in place relative to content
 }
 
 // CSI T: Scroll down (reverse index in region by N lines)
@@ -758,6 +750,7 @@ func escapeScrollDown(t *Terminal, msg string) {
 	for i := t.scrollTop; i < t.scrollTop+lines && i <= t.scrollBottom; i++ {
 		t.content.SetRow(i, widget.TextGridRow{})
 	}
+	// Cursor remains in place relative to content
 }
 
 // escapeDeviceStatusReport handles CSI ... n queries

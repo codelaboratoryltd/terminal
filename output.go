@@ -93,6 +93,7 @@ type parseState struct {
 	dcs           bool
 	printing      bool
 	dcsEscPending bool
+	csi           bool
 }
 
 func (t *Terminal) handleOutput(buf []byte) []byte {
@@ -109,6 +110,21 @@ func (t *Terminal) handleOutput(buf []byte) []byte {
 		r    rune
 		i    = -1
 	)
+	if t.trace != nil && len(buf) > 0 {
+		// Log raw bytes in hex for debugging
+		_, _ = t.trace.Write([]byte("IN "))
+		for i := 0; i < len(buf); i++ {
+			b := buf[i]
+			hi := "0123456789ABCDEF"[b>>4]
+			lo := "0123456789ABCDEF"[b&0x0F]
+			t.trace.Write([]byte{hi, lo})
+			if i != len(buf)-1 {
+				t.trace.Write([]byte{' '})
+			}
+		}
+		t.trace.Write([]byte{'\n'})
+	}
+
 	for {
 		i += size
 		buf = buf[size:]
@@ -127,6 +143,44 @@ func (t *Terminal) handleOutput(buf []byte) []byte {
 
 		if t.state.printing {
 			t.parsePrinting(buf, size)
+			continue
+		}
+
+		// Handle 8-bit C1 controls that map to CSI/OSC/DCS/APC and single-byte IND/NEL/RI
+		switch r {
+		case 0x84: // IND
+			if t.cursorRow < t.scrollBottom {
+				t.moveCursor(t.cursorRow+1, t.cursorCol)
+			} else {
+				fyne.Do(t.scrollDown)
+			}
+			continue
+		case 0x85: // NEL
+			if t.cursorRow < t.scrollBottom {
+				t.moveCursor(t.cursorRow+1, 0)
+			} else {
+				fyne.Do(t.scrollDown)
+				t.moveCursor(t.scrollBottom, 0)
+			}
+			continue
+		case 0x8d: // RI
+			if t.cursorRow > t.scrollTop {
+				t.moveCursor(t.cursorRow-1, t.cursorCol)
+			} else {
+				fyne.Do(t.scrollUp)
+			}
+			continue
+		case 0x90: // DCS
+			t.state.dcs = true
+			continue
+		case 0x9b: // CSI
+			t.state.csi = true
+			continue
+		case 0x9d: // OSC
+			t.state.osc = true
+			continue
+		case 0x9f: // APC
+			t.state.apc = true
 			continue
 		}
 		// While inside DCS, accumulate bytes; on ESC check if next is '\\' to terminate
@@ -148,6 +202,13 @@ func (t *Terminal) handleOutput(buf []byte) []byte {
 				continue
 			}
 			t.parseDCS(r)
+			continue
+		}
+		if t.state.csi {
+			t.parseEscape(r)
+			if t.state.esc == noEscape {
+				t.state.csi = false
+			}
 			continue
 		}
 		if r == asciiEscape {
@@ -230,9 +291,29 @@ func (t *Terminal) parseEscState(r rune) (shouldContinue bool) {
 		t.cursorRow = t.savedRow
 		t.cursorCol = t.savedCol
 	case 'D':
-		fyne.Do(t.scrollDown)
+		// IND: Index (move cursor down, scroll up within scroll region if at bottom margin)
+		if t.cursorRow < t.scrollBottom {
+			t.moveCursor(t.cursorRow+1, t.cursorCol)
+		} else {
+			t.scrollDown()
+			// Cursor stays at bottom margin
+		}
+	case 'E':
+		// NEL: Next Line (like CR+LF): move to first column of next line, scrolling within region if needed
+		if t.cursorRow < t.scrollBottom {
+			t.moveCursor(t.cursorRow+1, 0)
+		} else {
+			t.scrollDown()
+			t.moveCursor(t.scrollBottom, 0)
+		}
 	case 'M':
-		fyne.Do(t.scrollUp)
+		// RI: Reverse Index (move cursor up, scroll down within scroll region if at top margin)
+		if t.cursorRow > t.scrollTop {
+			t.moveCursor(t.cursorRow-1, t.cursorCol)
+		} else {
+			t.scrollUp()
+			// Cursor stays at top margin
+		}
 	case 'c':
 		// RIS: Full reset
 		t.resetTerminal()
@@ -325,8 +406,8 @@ func (t *Terminal) handleOutputChar(r rune) {
 		cellStyle = widget2.NewTermTextGridStyle(t.currentFG, t.currentBG, highlightBitMask, t.blinking, t.bold, t.underlined)
 	}
 
-	// Place the character at the current position
-	t.content.SetCell(t.cursorRow, t.cursorCol, widget.TextGridCell{Rune: r, Style: cellStyle})
+	// Place the character at the current position (manually to avoid TextGrid internal assumptions)
+	t.content.Rows[t.cursorRow].Cells[t.cursorCol] = widget.TextGridCell{Rune: r, Style: cellStyle}
 
 	// Advance cursor/defer wrap according to xterm rules
 	lastCol := int(t.config.Columns) - 1
@@ -364,25 +445,32 @@ func (t *Terminal) ringBell() {
 }
 
 func (t *Terminal) scrollUp() {
+	// Ensure the buffer has at least bottom margin rows
+	needed := t.scrollBottom + 1
+	for len(t.content.Rows) < needed {
+		t.content.Rows = append(t.content.Rows, widget.TextGridRow{})
+	}
+	// Scroll the region down by one line: shift rows [top+1..bottom] down
 	for i := t.scrollBottom; i > t.scrollTop; i-- {
 		t.content.Rows[i] = t.content.Row(i - 1)
 	}
+	// Clear the top line of the region
 	t.content.Rows[t.scrollTop] = widget.TextGridRow{}
 	t.content.Refresh()
 }
 
 func (t *Terminal) scrollDown() {
-	i := t.scrollTop
-	for ; i < t.scrollBottom && i < len(t.content.Rows)-1; i++ {
+	// Ensure the buffer has at least bottom margin rows
+	needed := t.scrollBottom + 1
+	for len(t.content.Rows) < needed {
+		t.content.Rows = append(t.content.Rows, widget.TextGridRow{})
+	}
+	// Scroll the region up by one line: shift rows [top..bottom-1] up
+	for i := t.scrollTop; i < t.scrollBottom; i++ {
 		t.content.Rows[i] = t.content.Row(i + 1)
 	}
-	for ; i < len(t.content.Rows); i++ {
-		if len(t.content.Rows) > t.scrollBottom {
-			t.content.Rows[t.scrollBottom] = widget.TextGridRow{}
-		} else {
-			t.content.Rows = append(t.content.Rows, widget.TextGridRow{})
-		}
-	}
+	// Clear the bottom line of the region
+	t.content.Rows[t.scrollBottom] = widget.TextGridRow{}
 	t.content.Refresh()
 }
 
