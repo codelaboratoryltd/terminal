@@ -226,8 +226,10 @@ func (t *Terminal) parseEscState(r rune) (shouldContinue bool) {
 }
 
 func (t *Terminal) parseEscape(r rune) {
+	// Accumulate all CSI parameter and intermediate bytes until we reach a final byte.
+	// CSI grammar: parameters 0x30-0x3F, intermediates 0x20-0x2F, final 0x40-0x7E.
 	t.state.code += string(r)
-	if (r < '0' || r > '9') && r != ';' && r != '=' && r != '?' && r != '>' {
+	if r >= '@' && r <= '~' { // final byte reached
 		t.handleEscape(t.state.code)
 		t.state.code = ""
 		t.state.esc = noEscape

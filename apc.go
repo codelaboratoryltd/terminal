@@ -32,9 +32,16 @@ func (t *Terminal) handleAPC(code string) {
 func (t *Terminal) handleDCS(code string) {
 	if strings.HasPrefix(code, "tmux;") {
 		inner := code[len("tmux;"):]
-		// tmux encodes ESC as ESC ESC in some cases; a basic passthrough here is to
-		// re-inject bytes as-is. We rely on our parser to handle them.
-		_, _ = t.in.Write([]byte(inner))
+		// Reparse the inner content as if it arrived from the PTY output
+		// so nested sequences take effect immediately.
+		buf := []byte(inner)
+		_ = buf // ensure not nil
+		t.handleOutput(buf)
+		return
+	}
+	if strings.HasPrefix(code, "screen;") {
+		inner := code[len("screen;"):]
+		t.handleOutput([]byte(inner))
 		return
 	}
 	// Future: handle other DCS (e.g., DECRQSS, XTGETTCAP) as needed

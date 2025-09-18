@@ -79,6 +79,7 @@ func (t *Terminal) refreshCursor() {
 		// Default to block cursor
 		width = cellSize.Width
 	}
+
 	t.cursor.Resize(fyne.NewSize(width, cellSize.Height))
 
 	// Cursor visual adjustments:

@@ -17,12 +17,15 @@ var escapes = map[rune]func(*Terminal, string){
 	'B': escapeMoveCursorDown,
 	'C': escapeMoveCursorRight,
 	'D': escapeMoveCursorLeft,
+	'E': escapeCursorNextLine, // CNL
+	'F': escapeCursorPrevLine, // CPL
 	'd': escapeMoveCursorRow,
 	'H': escapeMoveCursor,
 	'f': escapeMoveCursor,
 	'G': escapeMoveCursorCol,
 	'h': escapePrivateModeOn,
 	'L': escapeInsertLines,
+	'M': escapeDeleteLines,
 	'l': escapePrivateModeOff,
 	// Note: 'h'/'l' without '?' are SM/RM; we'll handle '20h/20l' etc.
 	'm': escapeColorMode,
@@ -30,6 +33,7 @@ var escapes = map[rune]func(*Terminal, string){
 	'J': escapeEraseInScreen,
 	'K': escapeEraseInLine,
 	'P': escapeDeleteChars,
+	'X': escapeEraseChars, // ECH
 	'r': escapeSetScrollArea,
 	's': escapeSaveCursor,
 	'S': escapeScrollUp,
@@ -37,6 +41,12 @@ var escapes = map[rune]func(*Terminal, string){
 	'u': escapeRestoreCursor,
 	'i': escapePrinterMode,
 	'c': escapeDeviceAttribute,
+	'q': escapeCursorStyle,
+	// xterm extensions / DEC
+	'a': escapeHPR, // HPR: Cursor Forward by Columns
+	'e': escapeVPR, // VPR: Cursor Down by Rows
+	// DECSTR soft reset
+	'p': escapeSoftResetBangAware,
 }
 
 func (t *Terminal) handleEscape(code string) {
@@ -275,6 +285,23 @@ func escapeEraseInLine(t *Terminal, msg string) {
 	}
 }
 
+// CSI X: Erase Characters (from cursor right, N characters)
+func escapeEraseChars(t *Terminal, msg string) {
+	n, _ := strconv.Atoi(msg)
+	if n <= 0 {
+		n = 1
+	}
+	row := t.content.Row(t.cursorRow)
+	end := t.cursorCol + n
+	if end > len(row.Cells) {
+		end = len(row.Cells)
+	}
+	blank := widget.TextGridCell{Rune: ' ', Style: widget2.NewTermTextGridStyle(t.currentFG, t.currentBG, highlightBitMask, t.blinking, t.bold, t.underlined)}
+	for i := t.cursorCol; i < end; i++ {
+		t.content.SetCell(t.cursorRow, i, blank)
+	}
+}
+
 func escapeEraseInScreen(t *Terminal, msg string) {
 	mode, _ := strconv.Atoi(msg)
 	switch mode {
@@ -332,6 +359,41 @@ func escapeInsertLines(t *Terminal, msg string) {
 	}
 }
 
+// CSI M: Delete Lines (within scroll region)
+func escapeDeleteLines(t *Terminal, msg string) {
+	n, _ := strconv.Atoi(msg)
+	if n <= 0 {
+		n = 1
+	}
+	// Shift lines up by n within the scroll region starting at cursorRow
+	for i := t.cursorRow; i <= t.scrollBottom-n; i++ {
+		t.content.SetRow(i, t.content.Row(i+n))
+	}
+	for i := t.scrollBottom - n + 1; i <= t.scrollBottom; i++ {
+		t.content.SetRow(i, widget.TextGridRow{})
+	}
+}
+
+// CSI Ps SP q: DECSCUSR - Set cursor style
+// 0 or 1 -> blinking block, 2 -> steady block, 3 -> blinking underline, 4 -> steady underline,
+// 5 -> blinking bar, 6 -> steady bar. We approximate: block vs caret (bar) and ignore blink per style.
+func escapeCursorStyle(t *Terminal, msg string) {
+	// Expect format like "Ps SP" then final 'q'. Our parser passes msg without final,
+	// and SP (space) is included in msg. Split by space to get [Ps].
+	parts := strings.Split(msg, " ")
+	if len(parts) == 0 || parts[0] == "" {
+		return
+	}
+	ps, _ := strconv.Atoi(parts[0])
+	switch ps {
+	case 5, 6: // bar
+		t.SetCursorShape("caret")
+	default:
+		// treat others as block
+		t.SetCursorShape("block")
+	}
+}
+
 func escapeMoveCursorUp(t *Terminal, msg string) {
 	rows, _ := strconv.Atoi(msg)
 	if rows == 0 {
@@ -364,6 +426,24 @@ func escapeMoveCursorLeft(t *Terminal, msg string) {
 	t.moveCursor(t.cursorRow, t.cursorCol-cols)
 }
 
+// CSI E: Cursor Next Line (move down N and to column 1)
+func escapeCursorNextLine(t *Terminal, msg string) {
+	n, _ := strconv.Atoi(msg)
+	if n <= 0 {
+		n = 1
+	}
+	t.moveCursor(t.cursorRow+n, 0)
+}
+
+// CSI F: Cursor Previous Line (move up N and to column 1)
+func escapeCursorPrevLine(t *Terminal, msg string) {
+	n, _ := strconv.Atoi(msg)
+	if n <= 0 {
+		n = 1
+	}
+	t.moveCursor(t.cursorRow-n, 0)
+}
+
 func escapeMoveCursorRow(t *Terminal, msg string) {
 	row, _ := strconv.Atoi(msg)
 	if t.originMode {
@@ -377,6 +457,24 @@ func escapeMoveCursorRow(t *Terminal, msg string) {
 func escapeMoveCursorCol(t *Terminal, msg string) {
 	col, _ := strconv.Atoi(msg)
 	t.moveCursor(t.cursorRow, col-1)
+}
+
+// CSI a: HPR - Cursor Forward by Columns
+func escapeHPR(t *Terminal, msg string) {
+	n, _ := strconv.Atoi(msg)
+	if n <= 0 {
+		n = 1
+	}
+	t.moveCursor(t.cursorRow, t.cursorCol+n)
+}
+
+// CSI e: VPR - Cursor Down by Rows
+func escapeVPR(t *Terminal, msg string) {
+	n, _ := strconv.Atoi(msg)
+	if n <= 0 {
+		n = 1
+	}
+	t.moveCursor(t.cursorRow+n, t.cursorCol)
 }
 
 func escapePrivateMode(t *Terminal, msg string, enable bool) {
@@ -498,6 +596,11 @@ func escapeMode(t *Terminal, msg string, enable bool) {
 	modes := strings.Split(msg, ";")
 	for _, mode := range modes {
 		switch mode {
+		case "7":
+			// Some applications use SM/RM 7 (without '?') to control autowrap
+			// even though DECAWM is technically a DEC private mode.
+			// Support it here for compatibility with such apps/terminfo entries.
+			t.wrapAround = enable
 		case "20":
 			// LNM: New Line Mode
 			t.newLineMode = enable
@@ -636,6 +739,37 @@ func escapeDeviceStatusReport(t *Terminal, msg string) {
 	if t.debug {
 		log.Println("Unhandled DSR", msg)
 	}
+}
+
+// DECSTR: Soft reset (CSI ! p). Our parser sees final 'p', so detect preceding '!'
+func escapeSoftResetBangAware(t *Terminal, msg string) {
+	// Soft reset if message exactly "!"
+	if strings.TrimSpace(msg) == "!" {
+		// Do not clear the screen or scrollback; reset modes/attributes per xterm soft reset
+		t.wrapAround = true
+		t.wrapPending = false
+		t.newLineMode = false
+		t.applicationCursorKeys = false
+		t.originMode = false
+		t.cursorHidden = false
+		t.g0Charset = charSetANSII
+		t.g1Charset = charSetANSII
+		t.useG1CharSet = false
+		t.currentBG = nil
+		t.currentFG = nil
+		t.bold = false
+		t.blinking = false
+		t.underlined = false
+		// scroll region to full screen
+		t.scrollTop = 0
+		if t.config.Rows > 0 {
+			t.scrollBottom = int(t.config.Rows) - 1
+		}
+		// cursor to home
+		t.moveCursor(0, 0)
+		return
+	}
+	// otherwise treat as regular 'p' (ignored here)
 }
 
 func trimLeftZeros(s string) string {
