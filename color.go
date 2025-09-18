@@ -236,6 +236,20 @@ func (t *Terminal) handleColorEscape(message string) {
 }
 
 func (t *Terminal) handleColorMode(modeStr string) {
+	// Handle extended SGR parameters that use colon separators, e.g. "4:3"
+	// According to ECMA-48/xterm extensions, 4:<n> sets underline style.
+	// We don't support different styles yet, but we can enable underline and avoid parse errors.
+	if strings.HasPrefix(modeStr, "4:") {
+		t.underlined = true
+		return
+	}
+	// Ignore other unsupported extended forms like "38:..." to avoid noisy logs
+	if strings.Contains(modeStr, ":") {
+		if t.debug {
+			log.Println("Unsupported extended graphics mode", modeStr)
+		}
+		return
+	}
 	mode, err := strconv.Atoi(modeStr)
 	if err != nil {
 		fyne.LogError("Failed to parse color mode: "+modeStr, err)
