@@ -207,12 +207,6 @@ func (t *Terminal) handleColorEscape(message string) {
 		}
 		return
 	}
-	if message[0] == '>' || message[0] == '?' {
-		if t.debug {
-			log.Println("Strange colour mode", message)
-		}
-		return
-	}
 	modes := strings.Split(message, ";")
 	for i := 0; i < len(modes); i++ {
 		mode := modes[i]
@@ -236,6 +230,34 @@ func (t *Terminal) handleColorEscape(message string) {
 }
 
 func (t *Terminal) handleColorMode(modeStr string) {
+	// Trim any incidental whitespace first
+	modeStr = strings.TrimSpace(modeStr)
+	if modeStr == "" {
+		return
+	}
+	// Handle extended SGR parameters that use colon separators, e.g. "4:3"
+	// According to ECMA-48/xterm extensions, 4:<n> sets underline style.
+	// We don't support different styles yet, but we can enable underline and avoid parse errors.
+	if strings.HasPrefix(modeStr, "4:") {
+		t.underlined = true
+		return
+	}
+	// Ignore other unsupported extended forms like "38:..." to avoid noisy logs
+	if strings.Contains(modeStr, ":") {
+		if t.debug {
+			log.Println("Unsupported extended graphics mode", modeStr)
+		}
+		return
+	}
+	// Ignore any non-numeric tokens defensively (e.g. stray "(")
+	for _, r := range modeStr {
+		if r < '0' || r > '9' {
+			if t.debug {
+				log.Println("Ignoring non-numeric graphics mode", modeStr)
+			}
+			return
+		}
+	}
 	// Handle extended SGR parameters that use colon separators, e.g. "4:3"
 	// According to ECMA-48/xterm extensions, 4:<n> sets underline style.
 	// We don't support different styles yet, but we can enable underline and avoid parse errors.
