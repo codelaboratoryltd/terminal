@@ -32,16 +32,27 @@ func (t *Terminal) handleAPC(code string) {
 func (t *Terminal) handleDCS(code string) {
 	if strings.HasPrefix(code, "tmux;") {
 		inner := code[len("tmux;"):]
-		// Reparse the inner content as if it arrived from the PTY output
-		// so nested sequences take effect immediately.
-		buf := []byte(inner)
-		_ = buf // ensure not nil
-		t.handleOutput(buf)
+		// Some tmux versions double ESC within the payload (ESC ESC). Collapse them back.
+		inner = strings.ReplaceAll(inner, string([]byte{27, 27}), string([]byte{27}))
+		if strings.IndexByte(inner, 27) == -1 {
+			// Fast-path: plain text, write directly
+			for _, r := range inner {
+				t.handleOutputChar(rune(r))
+			}
+		} else {
+			t.handleOutput([]byte(inner))
+		}
 		return
 	}
 	if strings.HasPrefix(code, "screen;") {
 		inner := code[len("screen;"):]
-		t.handleOutput([]byte(inner))
+		if strings.IndexByte(inner, 27) == -1 {
+			for _, r := range inner {
+				t.handleOutputChar(rune(r))
+			}
+		} else {
+			t.handleOutput([]byte(inner))
+		}
 		return
 	}
 	// Future: handle other DCS (e.g., DECRQSS, XTGETTCAP) as needed

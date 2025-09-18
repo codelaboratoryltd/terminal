@@ -85,13 +85,14 @@ var decSpecialGraphics = map[rune]rune{
 }
 
 type parseState struct {
-	code     string
-	esc      int
-	osc      bool
-	vt100    rune
-	apc      bool
-	dcs      bool
-	printing bool
+	code          string
+	esc           int
+	osc           bool
+	vt100         rune
+	apc           bool
+	dcs           bool
+	printing      bool
+	dcsEscPending bool
 }
 
 func (t *Terminal) handleOutput(buf []byte) []byte {
@@ -128,6 +129,27 @@ func (t *Terminal) handleOutput(buf []byte) []byte {
 			t.parsePrinting(buf, size)
 			continue
 		}
+		// While inside DCS, accumulate bytes; on ESC check if next is '\\' to terminate
+		if t.state.dcs {
+			if t.state.dcsEscPending {
+				if r == '\\' {
+					t.handleDCS(t.state.code)
+					t.state.dcs = false
+					t.state.code = ""
+					t.state.dcsEscPending = false
+					continue
+				}
+				// The ESC was not a terminator, include it and current char
+				t.state.code += string(rune(asciiEscape))
+				t.state.dcsEscPending = false
+			}
+			if r == asciiEscape {
+				t.state.dcsEscPending = true
+				continue
+			}
+			t.parseDCS(r)
+			continue
+		}
 		if r == asciiEscape {
 			t.state.esc = i
 			continue
@@ -141,10 +163,6 @@ func (t *Terminal) handleOutput(buf []byte) []byte {
 		}
 		if t.state.apc {
 			t.parseAPC(r)
-			continue
-		}
-		if t.state.dcs {
-			t.parseDCS(r)
 			continue
 		}
 		if t.state.osc {
@@ -257,9 +275,8 @@ func (t *Terminal) parseAPC(r rune) {
 }
 
 func (t *Terminal) parseDCS(r rune) {
-	// DCS terminates on ST (ESC \\) or CAN/SUB; we handle ST here
+	// DCS content accumulation; termination handled when ESC \\ arrives via parseEscState
 	if r == 0 {
-		// Ignore embedded NULs
 		return
 	}
 	t.state.code += string(r)

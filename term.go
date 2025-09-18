@@ -279,7 +279,9 @@ func (t *Terminal) Resize(s fyne.Size) {
 	cellSize := t.guessCellSize()
 	cols := uint(math.Floor(float64(s.Width) / float64(cellSize.Width)))
 	rows := uint(math.Floor(float64(s.Height) / float64(cellSize.Height)))
-	if (t.config.Columns == cols) && (t.config.Rows == rows) {
+	sameGrid := (t.config.Columns == cols) && (t.config.Rows == rows)
+	samePixel := t.Size() == s
+	if sameGrid && samePixel {
 		return
 	}
 
@@ -293,9 +295,10 @@ func (t *Terminal) Resize(s fyne.Size) {
 	if t.scrollBottom == 0 || t.scrollBottom == oldRows-1 {
 		t.scrollBottom = int(t.config.Rows) - 1
 	}
-	t.onConfigure()
-
-	t.updatePTYSize()
+	if !sameGrid {
+		t.onConfigure()
+		t.updatePTYSize()
+	}
 }
 
 // SetDebug turns on output about terminal codes and other errors if the parameter is `true`.

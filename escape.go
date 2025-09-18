@@ -5,6 +5,7 @@ import (
 	"log"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/widget"
@@ -64,17 +65,10 @@ func (t *Terminal) handleEscape(code string) {
 }
 
 func (t *Terminal) clearScreen() {
-	width := int(t.config.Columns)
-	rows := int(t.config.Rows)
-	blankCell := widget.TextGridCell{Rune: ' ', Style: widget2.NewTermTextGridStyle(t.currentFG, t.currentBG, highlightBitMask, t.blinking, t.bold, t.underlined)}
-	for i := 0; i < rows; i++ {
-		line := make([]widget.TextGridCell, width)
-		for j := range line {
-			line[j] = blankCell
-		}
-		t.content.SetRow(i, widget.TextGridRow{Cells: line})
-	}
+	// Reset visible buffer to empty rows; rows will expand as output arrives
+	t.content.Rows = []widget.TextGridRow{}
 	t.moveCursor(0, 0)
+	t.content.Refresh()
 }
 
 func (t *Terminal) clearScreenFromCursor() {
@@ -776,15 +770,14 @@ func trimLeftZeros(s string) string {
 	if s == "" {
 		return s
 	}
-
 	i := 0
-	for _, r := range s {
-		if r > '0' {
+	for i < len(s) {
+		r, size := utf8.DecodeRuneInString(s[i:])
+		if r != 0 && r != '0' {
 			break
 		}
-		i++
+		i += size
 	}
-
 	return s[i:]
 }
 
