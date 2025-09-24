@@ -916,8 +916,6 @@ func (t *Terminal) initFontLookup() {
 
 // chooseFixedFontSize selects the largest font size that fits the available widget size for fixed rows/cols.
 func (t *Terminal) chooseFixedFontSize(avail fyne.Size) int {
-	fmt.Println("chooseFixedFontSize called with avail", avail)
-
 	if t.fontLookup == nil {
 		t.initFontLookup()
 	}
