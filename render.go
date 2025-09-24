@@ -23,6 +23,7 @@ type render struct {
 	bg            *canvas.Rectangle
 	bgClearCancel context.CancelFunc
 	border        *canvas.Rectangle
+	ptyBackground *canvas.Rectangle // Background rectangle behind PTY content area
 }
 
 func (r *render) Layout(s fyne.Size) {
@@ -45,7 +46,11 @@ func (r *render) Layout(s fyne.Size) {
 			baseTheme = r.term.Theme()
 		}
 		baseSize := baseTheme.Size(theme.SizeNameText)
-		r.term.contentThemer = &fontOverrideTheme{base: baseTheme, textSize: baseSize}
+		r.term.contentThemer = &ptyTheme{
+			base:            baseTheme,
+			textSize:        baseSize,
+			backgroundColor: r.getPTYBackgroundColor(),
+		}
 		if r.term.debug {
 			//println(fmt.Sprintf("Terminal Layout Debug: [%p] Created contentThemer with base size %.1f from theme %T (custom=%t)",
 			//	r.term, r.term.contentThemer.textSize, baseTheme, r.term.customTheme != nil))
@@ -171,6 +176,17 @@ func (r *render) Layout(s fyne.Size) {
 	} else {
 		r.border.Hidden = true
 	}
+
+	// Update PTY background rectangle behind the grid content
+	if r.ptyBackground == nil {
+		r.ptyBackground = canvas.NewRectangle(r.getPTYBackgroundColor())
+	}
+
+	// Position PTY background to exactly match the grid content area
+	r.ptyBackground.Move(fyne.NewPos(r.term.offsetX, r.term.offsetY))
+	r.ptyBackground.Resize(fyne.NewSize(gridWidth, gridHeight))
+	r.ptyBackground.FillColor = r.getPTYBackgroundColor()
+	r.ptyBackground.Hidden = false
 }
 
 func (r *render) MinSize() fyne.Size {
@@ -183,12 +199,17 @@ func (r *render) Refresh() {
 
 	// Keep background color in sync with theme and refresh to clear outside grid
 	if r.bg != nil {
-		r.bg.FillColor = theme.Color(theme.ColorNameBackground)
+		r.bg.FillColor = r.getBackgroundColor()
 		r.bg.Refresh()
 	}
 	if r.border != nil && r.term.borderEnabled {
 		r.border.StrokeColor = r.term.borderColor
 		r.border.Refresh()
+	}
+	// Keep PTY background color in sync and refresh
+	if r.ptyBackground != nil {
+		r.ptyBackground.FillColor = r.getPTYBackgroundColor()
+		r.ptyBackground.Refresh()
 	}
 	r.term.content.Refresh()
 }
@@ -196,6 +217,24 @@ func (r *render) Refresh() {
 func (r *render) BackgroundColor() color.Color {
 	// Use an opaque background so the canvas clears any stale pixels
 	// when this widget is refreshed/resized
+	return r.getBackgroundColor()
+}
+
+// getBackgroundColor returns the canvas background color (outside PTY area)
+// This respects the theme color for UI consistency
+func (r *render) getBackgroundColor() color.Color {
+	// Always use theme background color for canvas area
+	return theme.Color(theme.ColorNameBackground)
+}
+
+// getPTYBackgroundColor returns the PTY cell area background color
+// This uses the override color if set, ensuring terminals are always dark
+func (r *render) getPTYBackgroundColor() color.Color {
+	// Use custom background color if set (for PTY cells)
+	if r.term.backgroundColorOverride != nil {
+		return r.term.backgroundColorOverride
+	}
+	// Fall back to theme background color
 	return theme.Color(theme.ColorNameBackground)
 }
 
@@ -204,12 +243,12 @@ func (r *render) Objects() []fyne.CanvasObject {
 	// Always return the wrapper to keep object tree stable
 	// Ensure all objects are initialized to prevent nil pointer race conditions
 	if r.bg == nil {
-		newBg := canvas.NewRectangle(theme.Color(theme.ColorNameBackground))
+		newBg := canvas.NewRectangle(r.getBackgroundColor())
 		if newBg != nil {
 			r.bg = newBg
 		} else {
 			// Fallback if canvas creation fails
-			r.bg = canvas.NewRectangle(theme.Color(theme.ColorNameBackground))
+			r.bg = canvas.NewRectangle(r.getBackgroundColor())
 		}
 	}
 	if r.border == nil {
@@ -232,7 +271,11 @@ func (r *render) Objects() []fyne.CanvasObject {
 			if baseTheme == nil {
 				baseTheme = r.term.Theme()
 			}
-			r.term.contentThemer = &fontOverrideTheme{base: baseTheme, textSize: 12}
+			r.term.contentThemer = &ptyTheme{
+				base:            baseTheme,
+				textSize:        12,
+				backgroundColor: r.getPTYBackgroundColor(),
+			}
 			r.term.contentWrapper = container.NewThemeOverride(r.term.content, r.term.contentThemer)
 		}
 	}
@@ -255,6 +298,11 @@ func (r *render) Objects() []fyne.CanvasObject {
 		objects = append(objects, r.bg)
 	}
 
+	// Add PTY background behind the terminal content
+	if r.ptyBackground != nil {
+		objects = append(objects, r.ptyBackground)
+	}
+
 	if r.term.contentWrapper != nil {
 		objects = append(objects, r.term.contentWrapper)
 	}
@@ -270,11 +318,12 @@ func (r *render) Objects() []fyne.CanvasObject {
 	// Ensure we always return at least some objects to prevent empty slice issues
 	if len(objects) == 0 {
 		// Emergency fallback - create minimal objects
-		r.bg = canvas.NewRectangle(theme.Color(theme.ColorNameBackground))
+		r.bg = canvas.NewRectangle(r.getBackgroundColor())
+		r.ptyBackground = canvas.NewRectangle(r.getPTYBackgroundColor())
 		r.border = canvas.NewRectangle(color.Transparent)
 		r.term.cursor = canvas.NewRectangle(theme.Color(theme.ColorNamePrimary))
 		r.term.cursor.Hidden = true
-		objects = []fyne.CanvasObject{r.bg, r.border, r.term.cursor}
+		objects = []fyne.CanvasObject{r.bg, r.ptyBackground, r.border, r.term.cursor}
 	}
 
 	return objects
@@ -400,7 +449,8 @@ func (t *Terminal) CreateRenderer() fyne.WidgetRenderer {
 	t.cursorMoved = r.moveCursor
 
 	// Initialize all canvas objects immediately to prevent race conditions
-	r.bg = canvas.NewRectangle(theme.Color(theme.ColorNameBackground))
+	r.bg = canvas.NewRectangle(r.getBackgroundColor())
+	r.ptyBackground = canvas.NewRectangle(r.getPTYBackgroundColor())
 	r.border = canvas.NewRectangle(color.Transparent)
 
 	// Ensure cursor is initialized early
@@ -420,7 +470,17 @@ func (t *Terminal) CreateRenderer() fyne.WidgetRenderer {
 			if baseTheme == nil {
 				baseTheme = t.Theme()
 			}
-			t.contentThemer = &fontOverrideTheme{base: baseTheme, textSize: baseTheme.Size(theme.SizeNameText)}
+			var ptyBgColor color.Color
+			if t.backgroundColorOverride != nil {
+				ptyBgColor = t.backgroundColorOverride
+			} else {
+				ptyBgColor = theme.Color(theme.ColorNameBackground)
+			}
+			t.contentThemer = &ptyTheme{
+				base:            baseTheme,
+				textSize:        baseTheme.Size(theme.SizeNameText),
+				backgroundColor: ptyBgColor,
+			}
 		}
 		if t.contentWrapper == nil {
 			t.contentWrapper = container.NewThemeOverride(t.content, t.contentThemer)
@@ -443,7 +503,17 @@ func (t *Terminal) CreateRenderer() fyne.WidgetRenderer {
 		if baseTheme == nil {
 			baseTheme = t.Theme()
 		}
-		t.contentThemer = &fontOverrideTheme{base: baseTheme, textSize: baseTheme.Size(theme.SizeNameText)}
+		var ptyBgColor color.Color
+		if t.backgroundColorOverride != nil {
+			ptyBgColor = t.backgroundColorOverride
+		} else {
+			ptyBgColor = theme.Color(theme.ColorNameBackground)
+		}
+		t.contentThemer = &ptyTheme{
+			base:            baseTheme,
+			textSize:        baseTheme.Size(theme.SizeNameText),
+			backgroundColor: ptyBgColor,
+		}
 	}
 	t.contentWrapper = container.NewThemeOverride(t.content, t.contentThemer)
 

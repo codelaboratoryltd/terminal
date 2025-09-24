@@ -179,7 +179,12 @@ func (t *Terminal) resetTerminal() {
 	t.onMouseUp = nil
 
 	// Reset attributes
-	t.currentBG = nil
+	// Use custom background color if set, otherwise nil
+	if t.backgroundColorOverride != nil {
+		t.currentBG = t.backgroundColorOverride
+	} else {
+		t.currentBG = nil
+	}
 	t.currentFG = nil
 	t.bold = false
 	t.blinking = false
@@ -804,7 +809,12 @@ func escapeSoftResetBangAware(t *Terminal, msg string) {
 		t.g0Charset = charSetANSII
 		t.g1Charset = charSetANSII
 		t.useG1CharSet = false
-		t.currentBG = nil
+		// Use custom background color if set, otherwise nil
+		if t.backgroundColorOverride != nil {
+			t.currentBG = t.backgroundColorOverride
+		} else {
+			t.currentBG = nil
+		}
 		t.currentFG = nil
 		t.bold = false
 		t.blinking = false

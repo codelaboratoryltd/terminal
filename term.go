@@ -127,6 +127,8 @@ type Terminal struct {
 
 	// Theme override for ANSI colors
 	customTheme fyne.Theme
+	// Custom background color override - when set, this is used instead of theme background
+	backgroundColorOverride color.Color
 	// OSC handlers for Operating System Commands
 	oscHandlers map[int]func(string)
 	// APC handlers are now per-instance to avoid cross-terminal pollution
@@ -191,7 +193,7 @@ type Terminal struct {
 	fixedCols      uint
 	fixedFontSize  int
 	fontLookup     map[int]fyne.Size
-	contentThemer  *fontOverrideTheme
+	contentThemer  *ptyTheme
 	contentWrapper fyne.CanvasObject
 
 	// layout offsets for centering grid within widget
@@ -433,6 +435,30 @@ func (t *Terminal) SetStartDir(path string) {
 // SetBorderColor sets the color of the terminal border.
 func (t *Terminal) SetBorderColor(c color.Color) {
 	t.borderColor = c
+	t.Refresh()
+}
+
+// SetBackgroundColor sets a custom background color for the terminal.
+// When set, this overrides the theme background color for PTY cells.
+// Pass nil to revert to using the theme background color.
+func (t *Terminal) SetBackgroundColor(c color.Color) {
+	t.backgroundColorOverride = c
+
+	// Update the content themer to use the new background color for PTY cells
+	if t.contentThemer != nil {
+		if c != nil {
+			t.contentThemer.backgroundColor = c
+		} else {
+			t.contentThemer.backgroundColor = theme.Color(theme.ColorNameBackground)
+		}
+	}
+
+	// Update current background color for new cells
+	// Only update if currentBG is currently nil (default background)
+	if t.currentBG == nil {
+		t.currentBG = c
+	}
+
 	t.Refresh()
 }
 
@@ -869,7 +895,18 @@ func (t *Terminal) initFontLookup() {
 
 	// Prepare a theme wrapper we can tweak for content rendering
 	if t.contentThemer == nil {
-		t.contentThemer = &fontOverrideTheme{base: baseTheme, textSize: float32(theme.TextSize())}
+		// Use getPTYBackgroundColor through a helper since we don't have access to render here
+		var ptyBgColor color.Color
+		if t.backgroundColorOverride != nil {
+			ptyBgColor = t.backgroundColorOverride
+		} else {
+			ptyBgColor = theme.Color(theme.ColorNameBackground)
+		}
+		t.contentThemer = &ptyTheme{
+			base:            baseTheme,
+			textSize:        float32(theme.TextSize()),
+			backgroundColor: ptyBgColor,
+		}
 		if t.debug {
 			println(fmt.Sprintf("Terminal Font Lookup Debug: [%p] contentThemer created %p with base %p",
 				t, t.contentThemer, baseTheme))
@@ -946,6 +983,13 @@ type fontOverrideTheme struct {
 	textSize float32
 }
 
+// ptyTheme is a widget-local theme that overrides both text size and background color for PTY content
+type ptyTheme struct {
+	base            fyne.Theme
+	textSize        float32
+	backgroundColor color.Color
+}
+
 func (f *fontOverrideTheme) Color(n fyne.ThemeColorName, v fyne.ThemeVariant) color.Color {
 	return f.base.Color(n, v)
 }
@@ -963,6 +1007,29 @@ func (f *fontOverrideTheme) Size(n fyne.ThemeSizeName) float32 {
 		return f.textSize
 	}
 	return f.base.Size(n)
+}
+
+// ptyTheme methods - override background color and text size for PTY content
+func (p *ptyTheme) Color(n fyne.ThemeColorName, v fyne.ThemeVariant) color.Color {
+	if n == theme.ColorNameBackground {
+		return p.backgroundColor
+	}
+	return p.base.Color(n, v)
+}
+
+func (p *ptyTheme) Icon(n fyne.ThemeIconName) fyne.Resource {
+	return p.base.Icon(n)
+}
+
+func (p *ptyTheme) Font(style fyne.TextStyle) fyne.Resource {
+	return p.base.Font(style)
+}
+
+func (p *ptyTheme) Size(n fyne.ThemeSizeName) float32 {
+	if n == theme.SizeNameText {
+		return p.textSize
+	}
+	return p.base.Size(n)
 }
 
 // sanitizePosition ensures that the given position p is within the bounds of the terminal.

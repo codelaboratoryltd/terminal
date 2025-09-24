@@ -194,7 +194,12 @@ var (
 
 func (t *Terminal) handleColorEscape(message string) {
 	if message == "" || message == "0" {
-		t.currentBG = nil
+		// Use custom background color if set, otherwise nil
+		if t.backgroundColorOverride != nil {
+			t.currentBG = t.backgroundColorOverride
+		} else {
+			t.currentBG = nil
+		}
 		t.currentFG = nil
 		t.bold = false
 		t.blinking = false
@@ -306,7 +311,12 @@ func (t *Terminal) handleColorMode(modeStr string) {
 	case 27: // Not reversed - turn off reverse video
 		bg, fg := t.currentBG, t.currentFG
 		if fg != nil {
-			t.currentBG = nil
+			// Use custom background color if set, otherwise nil
+			if t.backgroundColorOverride != nil {
+				t.currentBG = t.backgroundColorOverride
+			} else {
+				t.currentBG = nil
+			}
 		} else {
 			t.currentBG = fg
 		}
@@ -324,7 +334,12 @@ func (t *Terminal) handleColorMode(modeStr string) {
 		// Standard background colors (black, red, green, yellow, blue, magenta, cyan, white)
 		t.currentBG = t.getBasicColor(mode - 40)
 	case 49: // Default background color
-		t.currentBG = nil
+		// Use custom background color if set, otherwise nil
+		if t.backgroundColorOverride != nil {
+			t.currentBG = t.backgroundColorOverride
+		} else {
+			t.currentBG = nil
+		}
 	case 90, 91, 92, 93, 94, 95, 96, 97:
 		// Bright foreground colors (bright black/gray, bright red, etc.)
 		t.currentFG = t.getBrightColor(mode - 90)
