@@ -2,6 +2,7 @@ package widget
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"fyne.io/fyne/v2/container"
@@ -39,6 +40,10 @@ func NewTermGrid() *TermGrid {
 // Refresh will be called when this grid should update.
 // We update our blinking status and then call the TextGrid we extended to refresh too.
 func (t *TermGrid) Refresh() {
+	// Safety check: don't refresh if Rows is nil (during cleanup)
+	if t.Rows == nil {
+		return
+	}
 	t.refreshBlink(false)
 }
 
@@ -46,7 +51,15 @@ func (t *TermGrid) refreshBlink(blink bool) {
 	// reset shouldBlink which can be set by setCellRune if a cell with BlinkEnabled is found
 	shouldBlink := false
 
+	// Safety check: ensure Rows is not nil before accessing
+	if t.Rows == nil {
+		return
+	}
+
 	for _, row := range t.Rows {
+		if row.Cells == nil {
+			continue
+		}
 		for _, r := range row.Cells {
 			if s, ok := r.Style.(*TermTextGridStyle); ok && s != nil && s.BlinkEnabled {
 				shouldBlink = true
@@ -69,6 +82,14 @@ func (t *TermGrid) refreshBlink(blink bool) {
 	}
 }
 
+// StopBlink stops any active blinking animation
+func (t *TermGrid) StopBlink() {
+	if t.tickerCancel != nil {
+		t.tickerCancel()
+		t.tickerCancel = nil
+	}
+}
+
 func (t *TermGrid) runBlink() {
 	if t.tickerCancel != nil {
 		t.tickerCancel()
@@ -79,6 +100,14 @@ func (t *TermGrid) runBlink() {
 	ticker := time.NewTicker(blinkingInterval)
 	blinking := false
 	go func() {
+		defer func() {
+			ticker.Stop()
+			if r := recover(); r != nil {
+				// Log panic but don't crash the application
+				fmt.Printf("Panic in TermGrid blink goroutine: %v\n", r)
+			}
+		}()
+
 		for {
 			select {
 			case <-tickerContext.Done():

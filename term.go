@@ -114,6 +114,8 @@ type Terminal struct {
 
 	// Mutex to protect resize operations from race conditions
 	resizeLock sync.Mutex
+	// Flag to indicate cleanup is in progress
+	cleaningUp bool
 
 	pty io.Closer
 	in  io.WriteCloser
@@ -655,17 +657,27 @@ func (t *Terminal) run() {
 	buf := make([]byte, bufLen)
 	var leftOver []byte
 	for {
+		// Check if cleanup is in progress before attempting to read
+		if t.cleaningUp {
+			return
+		}
+
 		num, err := t.out.Read(buf)
 		if err != nil {
 			if t.cmd != nil {
 				// wait for cmd (shell) to exit, populates ProcessState.ExitCode
 				t.cmd.Wait()
 			}
-			if err == io.EOF || err.Error() == "EOF" {
+
+			// Check for common exit conditions
+			errMsg := err.Error()
+			if err == io.EOF || errMsg == "EOF" {
 				break // term exit on macOS
-			} else if err, ok := err.(*os.PathError); ok &&
-				(err.Err.Error() == "input/output error" || err.Err.Error() == "file already closed") {
+			} else if pathErr, ok := err.(*os.PathError); ok && pathErr.Err != nil &&
+				(pathErr.Err.Error() == "input/output error" || pathErr.Err.Error() == "file already closed") {
 				break // broken pipe, terminal exit
+			} else if errMsg == "io: read/write on closed pipe" {
+				break // pipe closed during cleanup
 			}
 
 			fyne.LogError("pty read error", err)
@@ -678,7 +690,7 @@ func (t *Terminal) run() {
 			num += lenLeftOver
 		}
 
-		if t.content == nil {
+		if t.content == nil || t.cleaningUp {
 			return
 		}
 
@@ -1142,7 +1154,10 @@ func (t *Terminal) SetCursorShape(shape string) {
 func (t *Terminal) FocusGained() {
 	t.focused = true
 	t.ensureCursorBlinking()
-	t.Refresh()
+	// Only refresh if we're not in cleanup mode
+	if !t.cleaningUp {
+		t.Refresh()
+	}
 }
 
 func (t *Terminal) FocusLost() {
@@ -1151,7 +1166,10 @@ func (t *Terminal) FocusLost() {
 	if t.cursor != nil {
 		t.cursor.Hidden = true
 	}
-	t.Refresh()
+	// Only refresh if we're not in cleanup mode
+	if !t.cleaningUp {
+		t.Refresh()
+	}
 }
 
 // ensureCursorBlinking toggles the blinking loop based on visibility/focus and shape.
@@ -1181,7 +1199,14 @@ func (t *Terminal) startCursorBlink() {
 
 	go func() {
 		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
+		defer func() {
+			ticker.Stop()
+			if r := recover(); r != nil {
+				// Log panic but don't crash the application
+				fmt.Printf("Panic in cursor blink goroutine: %v\n", r)
+			}
+		}()
+
 		for {
 			select {
 			case <-ctx.Done():
@@ -1212,4 +1237,42 @@ func (t *Terminal) stopCursorBlink() {
 	if t.cursor != nil {
 		t.cursor.Hidden = !t.focused || t.cursorHidden
 	}
+}
+
+// Cleanup performs resource cleanup for the terminal
+// This should be called when the terminal is being destroyed
+func (t *Terminal) Cleanup() {
+	// Set cleanup flag to stop run loop processing
+	t.cleaningUp = true
+
+	// Stop cursor blinking first
+	t.stopCursorBlink()
+
+	// Close all listeners and channels
+	t.listenerLock.Lock()
+	for _, l := range t.listeners {
+		// Check if channel is not already closed
+		select {
+		case <-l:
+			// Channel already closed
+		default:
+			close(l)
+		}
+	}
+	t.listeners = nil
+	t.listenerLock.Unlock()
+
+	// Stop any blinking on the content before clearing it
+	if t.content != nil {
+		t.content.StopBlink()
+	}
+
+	// Note: Don't close PTY or I/O streams here as they may still be in use by run()
+	// The run() method will handle proper cleanup when it detects the closed pipe
+	// Just clear references to prevent memory leaks
+	t.content = nil
+	t.customTheme = nil
+	t.contentThemer = nil
+	t.contentWrapper = nil
+	t.fontLookup = nil
 }

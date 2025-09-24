@@ -211,7 +211,9 @@ func (r *render) Refresh() {
 		r.ptyBackground.FillColor = r.getPTYBackgroundColor()
 		r.ptyBackground.Refresh()
 	}
-	r.term.content.Refresh()
+	if r.term.content != nil {
+		r.term.content.Refresh()
+	}
 }
 
 func (r *render) BackgroundColor() color.Color {
