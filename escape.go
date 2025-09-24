@@ -39,6 +39,7 @@ var escapes = map[rune]func(*Terminal, string){
 	's': escapeSaveCursor,
 	'S': escapeScrollUp,
 	'T': escapeScrollDown,
+	't': escapeWindowManipulation, // Window manipulation
 	'u': escapeRestoreCursor,
 	'i': escapePrinterMode,
 	'c': escapeDeviceAttribute,
@@ -172,6 +173,8 @@ func (t *Terminal) resetTerminal() {
 	t.newLineMode = false
 	t.cursorHidden = false
 	t.applicationCursorKeys = false
+	t.insertMode = false
+	t.localEchoMode = true
 	t.onMouseDown = nil
 	t.onMouseUp = nil
 
@@ -606,6 +609,9 @@ func escapePrivateMode(t *Terminal, msg string, enable bool) {
 					t.content.Refresh()
 				}
 			}
+		case "12":
+			// Local Echo Mode - when disabled, terminal doesn't echo typed characters
+			t.localEchoMode = enable
 		case "2004":
 			t.bracketedPasteMode = enable
 		default:
@@ -641,6 +647,9 @@ func escapeMode(t *Terminal, msg string, enable bool) {
 	modes := strings.Split(msg, ";")
 	for _, mode := range modes {
 		switch mode {
+		case "4":
+			// IRM: Insert/Replace Mode
+			t.insertMode = enable
 		case "7":
 			// Some applications use SM/RM 7 (without '?') to control autowrap
 			// even though DECAWM is technically a DEC private mode.
@@ -790,6 +799,8 @@ func escapeSoftResetBangAware(t *Terminal, msg string) {
 		t.applicationCursorKeys = false
 		t.originMode = false
 		t.cursorHidden = false
+		t.insertMode = false
+		t.localEchoMode = true
 		t.g0Charset = charSetANSII
 		t.g1Charset = charSetANSII
 		t.useG1CharSet = false
@@ -861,5 +872,51 @@ func escapeDeviceAttribute(t *Terminal, code string) {
 	default:
 		// DA1: Report VT220 (CSI ? 1 ; 2 c would be explicit). Use simple VT220 response: CSI ? 6 c
 		_, _ = t.in.Write([]byte{asciiEscape, '[', '?', '6', 'c'})
+	}
+}
+
+// escapeWindowManipulation handles window manipulation sequences (xterm extensions)
+func escapeWindowManipulation(t *Terminal, msg string) {
+	parts := strings.Split(msg, ";")
+	if len(parts) == 0 {
+		return
+	}
+
+	command, err := strconv.Atoi(parts[0])
+	if err != nil {
+		if t.debug {
+			log.Println("Invalid window manipulation command:", msg)
+		}
+		return
+	}
+
+	switch command {
+	case 23:
+		// Report window position - silently ignore (many terminals don't respond to this)
+		// Responding can cause echo issues with some shells
+		if t.debug {
+			log.Println("Window manipulation: report position request (ignored)")
+		}
+	case 14:
+		// Report window size in pixels - respond with dummy size
+		// Format: ESC [ 4 ; height ; width t
+		_, _ = t.in.Write([]byte{asciiEscape, '[', '4', ';', '6', '0', '0', ';', '8', '0', '0', 't'})
+	case 18:
+		// Report window size in characters
+		// Format: ESC [ 8 ; rows ; cols t
+		rows := t.config.Rows
+		cols := t.config.Columns
+		if rows == 0 {
+			rows = 24
+		}
+		if cols == 0 {
+			cols = 80
+		}
+		response := fmt.Sprintf("%c[8;%d;%dt", asciiEscape, rows, cols)
+		_, _ = t.in.Write([]byte(response))
+	default:
+		if t.debug {
+			log.Println("Unsupported window manipulation command:", command)
+		}
 	}
 }

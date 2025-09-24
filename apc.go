@@ -8,10 +8,11 @@ import (
 // APCHandler handles a APC command for the given terminal.
 type APCHandler func(*Terminal, string)
 
-var apcHandlers = map[string]func(*Terminal, string){}
-
 func (t *Terminal) handleAPC(code string) {
-	for apcCommand, handler := range apcHandlers {
+	if t.apcHandlers == nil {
+		return
+	}
+	for apcCommand, handler := range t.apcHandlers {
 		if strings.HasPrefix(code, apcCommand) {
 			// Extract the argument from the code
 			arg := code[len(apcCommand):]
@@ -61,7 +62,11 @@ func (t *Terminal) handleDCS(code string) {
 	}
 }
 
-// RegisterAPCHandler registers a APC handler for the given APC command string.
-func RegisterAPCHandler(APC string, handler APCHandler) {
-	apcHandlers[APC] = handler
+// RegisterAPCHandler registers an APC handler on this terminal instance
+// for the given APC command string.
+func (t *Terminal) RegisterAPCHandler(APC string, handler APCHandler) {
+	if t.apcHandlers == nil {
+		t.apcHandlers = make(map[string]func(*Terminal, string))
+	}
+	t.apcHandlers[APC] = handler
 }
