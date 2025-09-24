@@ -2,11 +2,14 @@ package terminal
 
 import (
 	"context"
+	"fmt"
+	"hash/fnv"
 	"image/color"
 	"io"
 	"math"
 	"os"
 	"os/exec"
+	"reflect"
 	"runtime"
 	"sync"
 	"time"
@@ -16,6 +19,7 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
+	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/driver/mobile"
 	"fyne.io/fyne/v2/theme"
@@ -23,9 +27,67 @@ import (
 )
 
 const (
-	bufLen           = 32768 // 32KB buffer for output, to align with modern L1 cache
-	highlightBitMask = 0x55
+	bufLen             = 32768 // 32KB buffer for output, to align with modern L1 cache
+	highlightBitMask   = 0x55
+	maxAllowedFontSize = 96
+	// Do not scale font below this size when resizing to fit a fixed PTY grid
+	minAllowedFontSize = 10
 )
+
+// fontSizeKey represents a unique combination of theme and font size for lookup table
+type fontSizeKey struct {
+	themeHash uint64 // hash of theme type and properties
+	fontSize  float32
+}
+
+// Global shared font size lookup table - static values that can be shared between terminals
+var (
+	globalFontLookup   = make(map[fontSizeKey]fyne.Size)
+	globalFontLookupMu sync.RWMutex
+)
+
+// themeHash generates a hash for a theme based on its type and font resources
+func themeHash(theme fyne.Theme) uint64 {
+	h := fnv.New64a()
+
+	// Use the theme's type as part of the hash
+	themeType := reflect.TypeOf(theme).String()
+	h.Write([]byte(themeType))
+
+	// Include font resources in the hash since they affect cell size
+	monospaceFont := theme.Font(fyne.TextStyle{Monospace: true})
+	if monospaceFont != nil {
+		h.Write([]byte(monospaceFont.Name()))
+	}
+
+	return h.Sum64()
+}
+
+// getSharedCellSize retrieves a cell size from the shared lookup table
+func getSharedCellSize(theme fyne.Theme, fontSize float32) (fyne.Size, bool) {
+	key := fontSizeKey{
+		themeHash: themeHash(theme),
+		fontSize:  fontSize,
+	}
+
+	globalFontLookupMu.RLock()
+	size, exists := globalFontLookup[key]
+	globalFontLookupMu.RUnlock()
+
+	return size, exists
+}
+
+// setSharedCellSize stores a cell size in the shared lookup table
+func setSharedCellSize(theme fyne.Theme, fontSize float32, size fyne.Size) {
+	key := fontSizeKey{
+		themeHash: themeHash(theme),
+		fontSize:  fontSize,
+	}
+
+	globalFontLookupMu.Lock()
+	globalFontLookup[key] = size
+	globalFontLookupMu.Unlock()
+}
 
 type Config struct {
 	Title         string
@@ -43,11 +105,15 @@ const (
 type Terminal struct {
 	widget.BaseWidget
 	fyne.ShortcutHandler
-	content      *widget2.TermGrid
-	config       Config
-	listenerLock sync.Mutex
-	listeners    []chan Config
-	startDir     string
+	content        *widget2.TermGrid
+	config         Config
+	listenerLock   sync.Mutex
+	listeners      []chan Config
+	lastLayoutSize fyne.Size // Track last layout size to reduce debug spam
+	startDir       string
+
+	// Mutex to protect resize operations from race conditions
+	resizeLock sync.Mutex
 
 	pty io.Closer
 	in  io.WriteCloser
@@ -63,6 +129,8 @@ type Terminal struct {
 	customTheme fyne.Theme
 	// OSC handlers for Operating System Commands
 	oscHandlers map[int]func(string)
+	// APC handlers are now per-instance to avoid cross-terminal pollution
+	apcHandlers map[string]func(*Terminal, string)
 
 	cursor                   *canvas.Rectangle
 	cursorHidden, bufferMode bool   // buffer mode is an xterm extension that impacts control keys
@@ -87,6 +155,8 @@ type Terminal struct {
 	}
 	newLineMode            bool // new line mode or line feed mode
 	bracketedPasteMode     bool
+	insertMode             bool // IRM: insert/replace mode
+	localEchoMode          bool // local echo mode (when false, terminal doesn't echo)
 	state                  *parseState
 	blinking               bool
 	underlined             bool
@@ -105,12 +175,6 @@ type Terminal struct {
 	savedCursorRow int
 	savedCursorCol int
 
-	cellSize struct {
-		text   *canvas.Text
-		size   fyne.Size
-		expire time.Time
-	}
-
 	// Cursor blinking management
 	cursorBlinkCancel context.CancelFunc
 	cursorBlinkOn     bool // internal toggle to track blink state
@@ -120,6 +184,24 @@ type Terminal struct {
 
 	// Optional tracing of incoming PTY bytes for debugging
 	trace io.Writer
+
+	// Fixed PTY sizing / scaling state
+	fixedPTY       bool
+	fixedRows      uint
+	fixedCols      uint
+	fixedFontSize  int
+	fontLookup     map[int]fyne.Size
+	contentThemer  *fontOverrideTheme
+	contentWrapper fyne.CanvasObject
+
+	// layout offsets for centering grid within widget
+	offsetX float32
+	offsetY float32
+
+	// border configuration
+	borderColor   color.Color
+	borderWidth   float32
+	borderEnabled bool
 }
 
 // Printer is used for spooling print data when its received.
@@ -223,7 +305,14 @@ func (t *Terminal) DoubleTapped(pe *fyne.PointEvent) {
 		return
 	}
 
-	rowContent := t.content.Rows[row-1].Cells
+	// Additional safety check to prevent index out of bounds
+	rowIndex := row - 1
+	if rowIndex < 0 || rowIndex >= len(t.content.Rows) {
+		println(fmt.Sprintf("WARNING: DoubleTapped rowIndex %d out of bounds for Rows length %d (row=%d)", rowIndex, len(t.content.Rows), row))
+		return
+	}
+
+	rowContent := t.content.Rows[rowIndex].Cells
 
 	if col < 0 || col >= len(rowContent) {
 		return // No valid character under the cursor, do nothing
@@ -279,9 +368,36 @@ func (t *Terminal) RemoveListener(listener chan Config) {
 // Resize is called when this terminal widget has been resized.
 // It ensures that the virtual terminal is within the bounds of the widget.
 func (t *Terminal) Resize(s fyne.Size) {
+	// Protect resize operations with a mutex to prevent race conditions
+	t.resizeLock.Lock()
+	defer t.resizeLock.Unlock()
+
+	// In fixed PTY mode we do not change rows/cols on resize; instead we scale font
+	if t.fixedPTY {
+		oldSize := t.Size()
+		// If pixel size unchanged, do nothing
+		if oldSize == s {
+			return
+		}
+
+		t.BaseWidget.Resize(s)
+		// Keep PTY rows/cols, but update pixel size (X/Y) to match canvas
+		t.updatePTYSize()
+		// Ensure content is re-laid out with new size; do not alter t.config
+		t.Refresh()
+		return
+	}
+
 	cellSize := t.guessCellSize()
 	cols := uint(math.Floor(float64(s.Width) / float64(cellSize.Width)))
 	rows := uint(math.Floor(float64(s.Height) / float64(cellSize.Height)))
+	// Ensure we never end up with a 0x0 grid which can cause misalignment/races
+	if cols < 1 {
+		cols = 1
+	}
+	if rows < 1 {
+		rows = 1
+	}
 	sameGrid := (t.config.Columns == cols) && (t.config.Rows == rows)
 	samePixel := t.Size() == s
 	if sameGrid && samePixel {
@@ -312,6 +428,39 @@ func (t *Terminal) SetDebug(debug bool) {
 // SetStartDir can be called before one of the Run calls to specify the initial directory.
 func (t *Terminal) SetStartDir(path string) {
 	t.startDir = path
+}
+
+// SetBorderColor sets the color of the terminal border.
+func (t *Terminal) SetBorderColor(c color.Color) {
+	t.borderColor = c
+	t.Refresh()
+}
+
+// SetBorderWidth sets the width of the terminal border in pixels.
+func (t *Terminal) SetBorderWidth(width float32) {
+	t.borderWidth = width
+	t.Refresh()
+}
+
+// EnableBorder enables or disables the terminal border.
+func (t *Terminal) EnableBorder(enabled bool) {
+	t.borderEnabled = enabled
+	t.Refresh()
+}
+
+// GetBorderColor returns the current border color.
+func (t *Terminal) GetBorderColor() color.Color {
+	return t.borderColor
+}
+
+// GetBorderWidth returns the current border width.
+func (t *Terminal) GetBorderWidth() float32 {
+	return t.borderWidth
+}
+
+// IsBorderEnabled returns whether the border is currently enabled.
+func (t *Terminal) IsBorderEnabled() bool {
+	return t.borderEnabled
 }
 
 // Tapped makes sure we ask for focus if user taps us.
@@ -408,25 +557,70 @@ func (t *Terminal) close() error {
 	return t.pty.Close()
 }
 
-// guessCellSize is called extremely frequently, so we cache the result briefly
+// guessCellSize is called extremely frequently, so we use a shared lookup table for efficiency
 func (t *Terminal) guessCellSize() fyne.Size {
-	// Use cached size if available. Cache resets every 100ms
-	if time.Now().Before(t.cellSize.expire) {
-		return t.cellSize.size
+	// In fixed mode, use the selected fixed font size to determine the cell size directly
+	if t.fixedPTY && t.fixedFontSize > 0 {
+		//fmt.Println("Using Fixed Font Size mode with size", t.fixedFontSize)
+		if t.fontLookup == nil {
+			t.initFontLookup()
+		}
+		if s, ok := t.fontLookup[t.fixedFontSize]; ok {
+			return s
+		}
 	}
 
-	if t.cellSize.text == nil {
-		t.cellSize.text = canvas.NewText("M", color.White)
-		t.cellSize.text.TextStyle.Monospace = true
+	// Determine the effective theme and font size
+	var baseTheme fyne.Theme
+	var fontSize float32
+
+	if t.contentThemer != nil {
+		baseTheme = t.contentThemer.base
+		fontSize = t.contentThemer.Size(theme.SizeNameText)
+	} else {
+		baseTheme = t.customTheme
+		if baseTheme == nil {
+			baseTheme = t.Theme()
+		}
+		fontSize = baseTheme.Size(theme.SizeNameText)
 	}
 
-	scale := t.Theme().Size(theme.SizeNameText) / theme.TextSize()
-	minSize := t.cellSize.text.MinSize()
-	size := fyne.NewSize(float32(math.Round(float64(minSize.Width*scale))), float32(math.Round(float64(minSize.Height*scale))))
+	// Check shared lookup table first
+	if size, exists := getSharedCellSize(baseTheme, fontSize); exists {
+		return size
+	}
 
-	// Cache the result for 100ms
-	t.cellSize.size = size
-	t.cellSize.expire = time.Now().Add(100 * time.Millisecond)
+	// Calculate the cell size if not in lookup table
+	var minSize fyne.Size
+
+	// Use the same measurement approach as initFontLookup for consistency
+	if t.contentThemer != nil {
+		fmt.Println("Using Cell Size mode")
+		// Create a temporary single-cell TextGrid to measure cell size accurately
+		tempGrid := widget2.NewTermGrid()
+		tempGrid.Resize(fyne.NewSize(200, 200))
+		tempGrid.SetText("M") // Single character - monospace means this is the cell size
+
+		tempWrapper := container.NewThemeOverride(tempGrid, t.contentThemer)
+		minSize = tempWrapper.MinSize()
+	} else {
+		fmt.Println("Using Canvas.Text mode")
+		// Fallback to canvas.Text measurement
+		cell := canvas.NewText("M", color.White)
+		cell.TextStyle.Monospace = true
+		cell.TextSize = fontSize
+
+		// Create theme override with the target font size
+		tempThemer := &fontOverrideTheme{base: baseTheme, textSize: fontSize}
+		wrapper := container.NewThemeOverride(cell, tempThemer)
+		wrapper.Resize(fyne.NewSize(100, 100))
+		minSize = wrapper.MinSize()
+	}
+
+	size := fyne.NewSize(float32(math.Round(float64(minSize.Width))), float32(math.Round(float64(minSize.Height))))
+
+	// Store in shared lookup table for future use
+	setSharedCellSize(baseTheme, fontSize, size)
 
 	return size
 }
@@ -558,12 +752,16 @@ func (t *Terminal) startingDir() string {
 // New sets up a new terminal instance with the bash shell
 func New() *Terminal {
 	t := &Terminal{
-		mouseCursor: desktop.DefaultCursor,
-		in:          discardWriter{},
-		keyRemap:    map[fyne.KeyName]fyne.KeyName{},
-		oscHandlers: make(map[int]func(string)),
-		cursorShape: "block", // Default to block cursor
-		wrapAround:  true,    // xterm default
+		mouseCursor:   desktop.DefaultCursor,
+		in:            discardWriter{},
+		keyRemap:      map[fyne.KeyName]fyne.KeyName{},
+		oscHandlers:   make(map[int]func(string)),
+		cursorShape:   "block", // Default to block cursor
+		wrapAround:    true,    // xterm default
+		localEchoMode: true,    // Default to local echo enabled
+		borderEnabled: true,
+		borderWidth:   1.0,
+		borderColor:   theme.Color(theme.ColorNameForeground),
 	}
 	t.ExtendBaseWidget(t)
 
@@ -576,6 +774,195 @@ func New() *Terminal {
 	}
 
 	return t
+}
+
+// EnableFixedPTYSize enables fixed rows/cols for the PTY and scales font to fit.
+// It sets the grid to the provided rows/cols and resizes the PTY accordingly when available.
+func (t *Terminal) EnableFixedPTYSize(rows, cols uint) {
+	if rows == 0 || cols == 0 {
+		return
+	}
+
+	// Protect font scaling configuration from race conditions
+	t.resizeLock.Lock()
+	defer t.resizeLock.Unlock()
+
+	t.fixedPTY = true
+	t.fixedRows, t.fixedCols = rows, cols
+	// Update config immediately; renderer will size/center and pick font to fit
+	t.config.Rows, t.config.Columns = rows, cols
+	if t.scrollBottom == 0 || t.scrollBottom >= int(rows) {
+		t.scrollBottom = int(rows) - 1
+	}
+	// Clear cached layout size to force font size calculation with new fixed dimensions
+	t.lastLayoutSize = fyne.NewSize(0, 0)
+	// Font lookup will be lazy-loaded when needed - no need to rebuild on resize
+	// Ensure PTY is resized to fixed grid if already running
+	t.updatePTYSize()
+	// Trigger a refresh to apply scaling & layout
+	fyne.Do(t.Refresh)
+}
+
+// GetFixedPTYSizeMode returns true if the terminal is in fixed PTY size mode.
+func (t *Terminal) GetFixedPTYSizeMode() bool {
+	return t.fixedPTY
+}
+
+// DisableFixedPTYSize returns the terminal to dynamic sizing based on widget size.
+func (t *Terminal) DisableFixedPTYSize() {
+	// Protect font scaling configuration from race conditions
+	t.resizeLock.Lock()
+	defer t.resizeLock.Unlock()
+
+	t.fixedPTY = false
+	// Clear fixed font to allow dynamic
+	t.fixedFontSize = 0
+	// Clear cached layout size to force recalculation on next layout
+	t.lastLayoutSize = fyne.NewSize(0, 0)
+	// Trigger re-layout which will recompute rows/cols and PTY size on next resize
+	fyne.Do(t.Refresh)
+}
+
+// initFontLookup builds a cache of cell sizes for each candidate font size.
+func (t *Terminal) initFontLookup() {
+	lookup := map[int]fyne.Size{}
+
+	// Use the terminal's custom theme if set, otherwise fall back to app theme
+	baseTheme := t.customTheme
+	if baseTheme == nil {
+		baseTheme = t.Theme()
+	}
+
+	if t.debug {
+		println(fmt.Sprintf("Terminal Font Lookup Debug: [%p] initFontLookup called with baseTheme=%p (custom=%t)",
+			t, baseTheme, t.customTheme != nil))
+	}
+
+	for i := 1; i <= maxAllowedFontSize; i++ {
+		// Create a fresh temporary single-cell TextGrid for each measurement
+		tempGrid := widget2.NewTermGrid()
+		tempGrid.Resize(fyne.NewSize(200, 200)) // Give it some space
+		tempGrid.SetText("M")                   // Single character for measurement
+
+		// Create a temporary theme override with the target font size
+		tempThemer := &fontOverrideTheme{base: baseTheme, textSize: float32(i)}
+		tempWrapper := container.NewThemeOverride(tempGrid, tempThemer)
+
+		// Force the grid to refresh with the new theme
+		tempWrapper.Refresh()
+
+		// Get the minimum size - since it's monospace, this is the cell size
+		cellSize := tempWrapper.MinSize()
+		lookup[i] = cellSize
+
+		if t.debug && (i == 14 || i == 36 || i == 1 || i == 96) {
+			println(fmt.Sprintf("Terminal Font Lookup Debug: [%p] Font size %d -> cell size %.1fx%.1f (calculated, theme=%p, themer.textSize=%.1f)",
+				t, i, cellSize.Width, cellSize.Height, baseTheme, tempThemer.textSize))
+		}
+	}
+
+	t.fontLookup = lookup
+	if t.debug {
+		println(fmt.Sprintf("Terminal Font Lookup Debug: [%p] fontLookup created with %d entries, stored at %p",
+			t, len(lookup), &t.fontLookup))
+	}
+
+	// Prepare a theme wrapper we can tweak for content rendering
+	if t.contentThemer == nil {
+		t.contentThemer = &fontOverrideTheme{base: baseTheme, textSize: float32(theme.TextSize())}
+		if t.debug {
+			println(fmt.Sprintf("Terminal Font Lookup Debug: [%p] contentThemer created %p with base %p",
+				t, t.contentThemer, baseTheme))
+		}
+	}
+}
+
+// chooseFixedFontSize selects the largest font size that fits the available widget size for fixed rows/cols.
+func (t *Terminal) chooseFixedFontSize(avail fyne.Size) int {
+	fmt.Println("chooseFixedFontSize called with avail", avail)
+
+	if t.fontLookup == nil {
+		t.initFontLookup()
+	}
+
+	cols := int(t.fixedCols)
+	rows := int(t.fixedRows)
+	best := minAllowedFontSize
+
+	// Add a more conservative safety margin to account for measurement precision issues and borders
+	safeWidth := avail.Width * 0.97   // 3% margin
+	safeHeight := avail.Height * 0.97 // 3% margin
+
+	for i := minAllowedFontSize; i <= maxAllowedFontSize; i++ {
+		s := t.fontLookup[i]
+		gw := float32(cols) * s.Width
+		gh := float32(rows) * s.Height
+		if gw <= safeWidth && gh <= safeHeight {
+			best = i
+		} else {
+			break
+		}
+	}
+
+	// Ensure we never go below the minimum allowed font size
+	if best < minAllowedFontSize {
+		best = minAllowedFontSize
+	}
+
+	// Double-check that our chosen font size actually fits
+	if best > minAllowedFontSize {
+		s := t.fontLookup[best]
+		gw := float32(cols) * s.Width
+		gh := float32(rows) * s.Height
+		if gw > safeWidth || gh > safeHeight {
+			// If it doesn't fit, fall back to minimum
+			best = minAllowedFontSize
+		}
+	}
+
+	// Selected font debug disabled to prevent spam
+	if t.debug {
+		s := t.fontLookup[best]
+		gw := float32(cols) * s.Width
+		gh := float32(rows) * s.Height
+		println(fmt.Sprintf("[chooseFixedFontSize] Font Size %d, Cell Size: %.1fx%.1f -> Grid Size: %.1fx%.1f (Avail Width: %.1f, Avail Height: %.1f)",
+			best, s.Width, s.Height, gw, gh, avail.Width, avail.Height))
+	}
+
+	return best
+}
+
+// invalidateCellCache resets cached cell size data so recalculation uses latest theme size
+func (t *Terminal) invalidateCellCache() {
+	// Also invalidate cursor size so it gets recalculated with new cell size
+	if t.cursor != nil {
+		t.cursor.Resize(fyne.NewSize(0, 0)) // Force recalculation on next refresh
+	}
+}
+
+// fontOverrideTheme is a widget-local theme that allows overriding the base text size.
+type fontOverrideTheme struct {
+	base     fyne.Theme
+	textSize float32
+}
+
+func (f *fontOverrideTheme) Color(n fyne.ThemeColorName, v fyne.ThemeVariant) color.Color {
+	return f.base.Color(n, v)
+}
+
+func (f *fontOverrideTheme) Icon(n fyne.ThemeIconName) fyne.Resource {
+	return f.base.Icon(n)
+}
+
+func (f *fontOverrideTheme) Font(style fyne.TextStyle) fyne.Resource {
+	return f.base.Font(style)
+}
+
+func (f *fontOverrideTheme) Size(n fyne.ThemeSizeName) float32 {
+	if n == theme.SizeNameText {
+		return f.textSize
+	}
+	return f.base.Size(n)
 }
 
 // sanitizePosition ensures that the given position p is within the bounds of the terminal.
@@ -666,6 +1053,16 @@ func (t *Terminal) RemapKey(key fyne.KeyName, remap fyne.KeyName) {
 // SetTheme sets a custom theme for this terminal's ANSI colors
 func (t *Terminal) SetTheme(th fyne.Theme) {
 	t.customTheme = th
+	// Invalidate per-terminal font lookup - will be lazy-loaded with new theme when needed
+	if t.fixedPTY {
+		t.fontLookup = nil // Clear existing lookup, will rebuild on next access
+		// Clear cached layout size to force font size recalculation with new theme
+		t.lastLayoutSize = fyne.NewSize(0, 0)
+		if t.debug {
+			println(fmt.Sprintf("Terminal SetTheme Debug: [%p] Font lookup invalidated for new theme %p", t, th))
+		}
+	}
+	// Note: shared lookup table remains valid as it's keyed by theme hash
 }
 
 // SetCursorShape sets the cursor shape ("block" or "caret")

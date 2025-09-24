@@ -21,9 +21,14 @@ func (t *Terminal) updatePTYSize() {
 	if c != nil {
 		scale = c.Scale()
 	}
+	// Use the actual grid pixel size (cols/rows * cell size), not the widget size,
+	// so upstream programs see accurate pixel dimensions for the drawable area.
+	cell := t.guessCellSize()
+	gridW := float32(t.config.Columns) * cell.Width
+	gridH := float32(t.config.Rows) * cell.Height
 	_ = pty.Setsize(t.pty.(*os.File), &pty.Winsize{
 		Rows: uint16(t.config.Rows), Cols: uint16(t.config.Columns),
-		X: uint16(t.Size().Width * scale), Y: uint16(t.Size().Height * scale)})
+		X: uint16(gridW * scale), Y: uint16(gridH * scale)})
 }
 
 func (t *Terminal) startPTY() (io.WriteCloser, io.Reader, io.Closer, error) {

@@ -16,15 +16,24 @@ func (r position) String() string {
 
 func (t *Terminal) getTermPosition(pos fyne.Position) position {
 	cell := t.guessCellSize()
-	col := int(pos.X/cell.Width) + 1
-	row := int(pos.Y/cell.Height) + 1
+	// account for centering offsets in fixed mode (stored on terminal)
+	x := pos.X - t.offsetX
+	y := pos.Y - t.offsetY
+	if x < 0 {
+		x = 0
+	}
+	if y < 0 {
+		y = 0
+	}
+	col := int(x/cell.Width) + 1
+	row := int(y/cell.Height) + 1
 	return position{col, row}
 }
 
 // getTextPosition converts a terminal position (row and col) to fyne coordinates.
 func (t *Terminal) getTextPosition(pos position) fyne.Position {
 	cell := t.guessCellSize()
-	x := (pos.Col - 1) * int(cell.Width)  // Convert column to pixel position (1-based to 0-based)
-	y := (pos.Row - 1) * int(cell.Height) // Convert row to pixel position (1-based to 0-based)
-	return fyne.NewPos(float32(x), float32(y))
+	x := (pos.Col - 1) * int(cell.Width)
+	y := (pos.Row - 1) * int(cell.Height)
+	return fyne.NewPos(t.offsetX+float32(x), t.offsetY+float32(y))
 }

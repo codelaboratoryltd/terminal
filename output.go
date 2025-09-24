@@ -2,6 +2,7 @@ package terminal
 
 import (
 	"bytes"
+	"fmt"
 	"log"
 	"time"
 	"unicode/utf8"
@@ -393,6 +394,12 @@ func (t *Terminal) handleOutputChar(r rune) {
 		t.content.Rows = append(t.content.Rows, widget.TextGridRow{})
 	}
 
+	// Safety check: ensure cursorRow is within bounds
+	if t.cursorRow < 0 || t.cursorRow >= len(t.content.Rows) {
+		println(fmt.Sprintf("WARNING: handleOutputRune cursorRow %d out of bounds for Rows length %d", t.cursorRow, len(t.content.Rows)))
+		return
+	}
+
 	cellStyle := widget2.NewTermTextGridStyle(t.currentFG, t.currentBG, highlightBitMask, t.blinking, t.bold, t.underlined)
 	for len(t.content.Rows[t.cursorRow].Cells)-1 < t.cursorCol {
 		newCell := widget.TextGridCell{
@@ -407,7 +414,20 @@ func (t *Terminal) handleOutputChar(r rune) {
 	}
 
 	// Place the character at the current position (manually to avoid TextGrid internal assumptions)
-	t.content.Rows[t.cursorRow].Cells[t.cursorCol] = widget.TextGridCell{Rune: r, Style: cellStyle}
+	// Double-check bounds again before final access
+	if t.cursorRow >= 0 && t.cursorRow < len(t.content.Rows) && t.cursorCol >= 0 && t.cursorCol < len(t.content.Rows[t.cursorRow].Cells) {
+		t.content.Rows[t.cursorRow].Cells[t.cursorCol] = widget.TextGridCell{Rune: r, Style: cellStyle}
+	} else {
+		println(fmt.Sprintf("WARNING: handleOutputRune final bounds check failed - cursorRow:%d cursorCol:%d rowsLen:%d cellsLen:%d",
+			t.cursorRow, t.cursorCol, len(t.content.Rows),
+			func() int {
+				if t.cursorRow >= 0 && t.cursorRow < len(t.content.Rows) {
+					return len(t.content.Rows[t.cursorRow].Cells)
+				} else {
+					return -1
+				}
+			}()))
+	}
 
 	// Advance cursor/defer wrap according to xterm rules
 	lastCol := int(t.config.Columns) - 1

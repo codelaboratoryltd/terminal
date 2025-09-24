@@ -17,6 +17,7 @@ import (
 	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/lang"
 	"fyne.io/fyne/v2/theme"
+	"fyne.io/fyne/v2/widget"
 )
 
 const (
@@ -68,13 +69,6 @@ func termTitle() string {
 	return lang.L("Title")
 }
 
-func guessCellSize() fyne.Size {
-	cell := canvas.NewText("M", color.White)
-	cell.TextStyle.Monospace = true
-
-	return cell.MinSize()
-}
-
 func main() {
 	var debug bool
 	flag.BoolVar(&debug, "debug", false, "Show terminal debug messages")
@@ -111,19 +105,30 @@ func newTerminalWindow(a fyne.App, debug bool) fyne.Window {
 	})
 
 	t := terminal.New()
-	t.SetDebug(debug)
+	t.EnableFixedPTYSize(uint(24), uint(80))
+	t.SetBorderColor(color.NRGBA{R: 120, G: 120, B: 120, A: 255})
+	t.SetBorderWidth(2.0)
+	t.EnableBorder(true)
+	t.SetDebug(true)
 	setupListener(t, w)
-	sizeOverride := container.NewThemeOverride(container.NewStack(bg, img, over, t), th)
+	sizeOverride := container.NewThemeOverride(
+		container.NewPadded(container.NewStack(bg, img, over, t), container.NewCenter(widget.NewButton("Test", func() {
+			if t.GetFixedPTYSizeMode() {
+				t.DisableFixedPTYSize()
+			} else {
+				t.EnableFixedPTYSize(uint(24), uint(80))
+			}
+		}))), th)
 	w.SetContent(sizeOverride)
 
-	cellSize := guessCellSize()
-	w.Resize(fyne.NewSize(cellSize.Width*80, cellSize.Height*24))
+	w.Resize(fyne.NewSize(640, 480))
 	w.Canvas().Focus(t)
 
 	newTerm := func(_ fyne.Shortcut) {
 		w := newTerminalWindow(a, debug)
 		w.Show()
 	}
+
 	t.AddShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyN, Modifier: fyne.KeyModifierControl | fyne.KeyModifierShift}, newTerm)
 	if runtime.GOOS == "darwin" {
 		t.AddShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyN, Modifier: fyne.KeyModifierSuper}, newTerm)
