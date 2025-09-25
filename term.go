@@ -6,6 +6,7 @@ import (
 	"hash/fnv"
 	"image/color"
 	"io"
+	"log"
 	"math"
 	"os"
 	"os/exec"
@@ -623,16 +624,16 @@ func (t *Terminal) guessCellSize() fyne.Size {
 
 	// Use the same measurement approach as initFontLookup for consistency
 	if t.contentThemer != nil {
-		fmt.Println("Using Cell Size mode")
+		log.Println("Using Cell Size mode")
 		// Create a temporary single-cell TextGrid to measure cell size accurately
 		tempGrid := widget2.NewTermGrid()
+		tempWrapper := container.NewThemeOverride(tempGrid, t.contentThemer)
 		tempGrid.Resize(fyne.NewSize(200, 200))
 		tempGrid.SetText("M") // Single character - monospace means this is the cell size
-
-		tempWrapper := container.NewThemeOverride(tempGrid, t.contentThemer)
-		minSize = tempWrapper.MinSize()
+		tempWrapper.Refresh()
+		minSize = tempGrid.MinSize()
 	} else {
-		fmt.Println("Using Canvas.Text mode")
+		log.Println("Using Canvas.Text mode")
 		// Fallback to canvas.Text measurement
 		cell := canvas.NewText("M", color.White)
 		cell.TextStyle.Monospace = true
@@ -868,41 +869,46 @@ func (t *Terminal) initFontLookup() {
 	// Use the terminal's custom theme if set, otherwise fall back to app theme
 	baseTheme := t.customTheme
 	if baseTheme == nil {
+		if t.debug {
+			log.Printf("FontLookup: [%p] initFontLookup called with no custom theme, falling back to app theme\n",
+				t)
+		}
 		baseTheme = t.Theme()
 	}
 
 	if t.debug {
-		println(fmt.Sprintf("Terminal Font Lookup Debug: [%p] initFontLookup called with baseTheme=%p (custom=%t)",
-			t, baseTheme, t.customTheme != nil))
+		log.Printf("FontLookup: [%p] initFontLookup called with baseTheme=%p (custom=%t)\n",
+			t, baseTheme, t.customTheme != nil)
 	}
 
 	for i := 1; i <= maxAllowedFontSize; i++ {
 		// Create a fresh temporary single-cell TextGrid for each measurement
 		tempGrid := widget2.NewTermGrid()
-		tempGrid.Resize(fyne.NewSize(200, 200)) // Give it some space
-		tempGrid.SetText("M")                   // Single character for measurement
 
 		// Create a temporary theme override with the target font size
 		tempThemer := &fontOverrideTheme{base: baseTheme, textSize: float32(i)}
 		tempWrapper := container.NewThemeOverride(tempGrid, tempThemer)
 
-		// Force the grid to refresh with the new theme
+		tempGrid.Resize(fyne.NewSize(200, 200)) // Give it some space
+		tempGrid.SetText("M")                   // Single character for measurement
+
+		// Force the grid to refresh, just in case
 		tempWrapper.Refresh()
 
 		// Get the minimum size - since it's monospace, this is the cell size
-		cellSize := tempWrapper.MinSize()
+		cellSize := tempGrid.MinSize()
 		lookup[i] = cellSize
 
 		if t.debug && (i == 14 || i == 36 || i == 1 || i == 96) {
-			println(fmt.Sprintf("Terminal Font Lookup Debug: [%p] Font size %d -> cell size %.1fx%.1f (calculated, theme=%p, themer.textSize=%.1f)",
-				t, i, cellSize.Width, cellSize.Height, baseTheme, tempThemer.textSize))
+			log.Printf("FontLookup: [%p] Font size %d -> cell size %.1fx%.1f (calculated, theme=%p, themer.textSize=%.1f)\n",
+				t, i, cellSize.Width, cellSize.Height, baseTheme, tempThemer.textSize)
 		}
 	}
 
 	t.fontLookup = lookup
 	if t.debug {
-		println(fmt.Sprintf("Terminal Font Lookup Debug: [%p] fontLookup created with %d entries, stored at %p",
-			t, len(lookup), &t.fontLookup))
+		log.Printf("FontLookup: [%p] fontLookup created with %d entries, stored at %p\n",
+			t, len(lookup), &t.fontLookup)
 	}
 
 	// Prepare a theme wrapper we can tweak for content rendering
@@ -920,8 +926,8 @@ func (t *Terminal) initFontLookup() {
 			backgroundColor: ptyBgColor,
 		}
 		if t.debug {
-			println(fmt.Sprintf("Terminal Font Lookup Debug: [%p] contentThemer created %p with base %p",
-				t, t.contentThemer, baseTheme))
+			log.Printf("FontLookup: [%p] contentThemer created %p with base %p\n",
+				t, t.contentThemer, baseTheme)
 		}
 	}
 }
