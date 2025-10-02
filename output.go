@@ -337,9 +337,30 @@ func (t *Terminal) parseEscape(r rune) {
 }
 
 func (t *Terminal) parsePrinting(buf []byte, size int) {
-	t.printData = append(t.printData, buf[:size]...)
-	if bytes.HasSuffix(t.printData, []byte{asciiEscape, '[', '4', 'i'}) {
-		// Handle the end of printing
+	for i := 0; i < size; i++ {
+		b := buf[i]
+
+		// Simple state machine to detect ESC[4i
+		if b == asciiEscape {
+			// Potential start of end sequence
+			if i+3 < size && buf[i+1] == '[' && buf[i+2] == '4' && buf[i+3] == 'i' {
+				// Found complete ESC[4i sequence, end printing mode
+				escapePrinterMode(t, "4")
+				t.state.esc = noEscape
+				return
+			}
+			// Not the end sequence, add to print data
+			t.printData = append(t.printData, b)
+		} else {
+			// Regular data, add to print buffer
+			t.printData = append(t.printData, b)
+		}
+	}
+
+	// Also check if we have ESC[4i at the end of accumulated print data
+	// (handles case where sequence was split across multiple calls)
+	if len(t.printData) >= 4 && bytes.HasSuffix(t.printData, []byte{asciiEscape, '[', '4', 'i'}) {
+		// Remove the escape sequence and end printing
 		t.printData = t.printData[:len(t.printData)-4]
 		escapePrinterMode(t, "4")
 		t.state.esc = noEscape

@@ -851,6 +851,7 @@ func escapePrinterMode(t *Terminal, code string) {
 	case "5":
 		t.state.printing = true
 	case "4":
+
 		t.state.printing = false
 		if t.printData != nil {
 			if t.printer != nil {
