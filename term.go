@@ -129,6 +129,7 @@ type Terminal struct {
 	cursorRow, cursorCol       int
 	savedRow, savedCol         int
 	scrollTop, scrollBottom    int
+	cursorChangeCallback       func(x, y int)
 
 	// Theme override for ANSI colors
 	customTheme fyne.Theme
@@ -229,6 +230,18 @@ func (t *Terminal) Cursor() desktop.Cursor {
 		return desktop.DefaultCursor
 	}
 	return t.mouseCursor
+}
+
+// GridCursorRowCol returns the term grid row and column of the cursor.
+func (t *Terminal) GridCursorRowCol() (x, y int) {
+	return t.cursorRow, t.cursorCol
+}
+
+// GridCursorChangeCallback sets a callback function that will be called when the cursor changes position.
+func (t *Terminal) GridCursorChangeCallback(f func(x, y int)) {
+	if f != nil {
+		t.cursorChangeCallback = f
+	}
 }
 
 // AcceptsTab indicates that this widget will use the Tab key (avoids loss of focus).

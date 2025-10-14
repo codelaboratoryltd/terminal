@@ -239,6 +239,17 @@ func (t *Terminal) moveCursor(row, col int) {
 	if t.cursorMoved != nil {
 		fyne.Do(t.cursorMoved)
 	}
+
+	if t.cursorChangeCallback != nil {
+		fyne.Do(func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Println("Panic in cursorChangeCallback:", r)
+				}
+			}()
+			t.cursorChangeCallback(t.cursorRow, t.cursorCol)
+		})
+	}
 }
 
 func escapeColorMode(t *Terminal, msg string) {
