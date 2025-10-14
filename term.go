@@ -933,8 +933,8 @@ func (t *Terminal) chooseFixedFontSize(avail fyne.Size) int {
 	best := minAllowedFontSize
 
 	// Add a safety margin to account for measurement precision issues and borders
-	safeWidth := avail.Width * 0.97   // 3% margin
-	safeHeight := avail.Height * 0.97 // 3% margin
+	safeWidth := avail.Width * 0.99   // 1% margin
+	safeHeight := avail.Height * 0.99 // 1% margin
 
 	for i := minAllowedFontSize; i <= maxAllowedFontSize; i++ {
 		s, _ := getSharedCellSize(baseTheme, float32(i))
