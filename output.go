@@ -417,7 +417,9 @@ func (t *Terminal) handleOutputChar(r rune) {
 
 	// Safety check: ensure cursorRow is within bounds
 	if t.cursorRow < 0 || t.cursorRow >= len(t.content.Rows) {
-		println(fmt.Sprintf("WARNING: handleOutputRune cursorRow %d out of bounds for Rows length %d", t.cursorRow, len(t.content.Rows)))
+		if t.debug {
+			println(fmt.Sprintf("WARNING: handleOutputRune cursorRow %d out of bounds for Rows length %d", t.cursorRow, len(t.content.Rows)))
+		}
 		return
 	}
 
@@ -439,15 +441,17 @@ func (t *Terminal) handleOutputChar(r rune) {
 	if t.cursorRow >= 0 && t.cursorRow < len(t.content.Rows) && t.cursorCol >= 0 && t.cursorCol < len(t.content.Rows[t.cursorRow].Cells) {
 		t.content.Rows[t.cursorRow].Cells[t.cursorCol] = widget.TextGridCell{Rune: r, Style: cellStyle}
 	} else {
-		println(fmt.Sprintf("WARNING: handleOutputRune final bounds check failed - cursorRow:%d cursorCol:%d rowsLen:%d cellsLen:%d",
-			t.cursorRow, t.cursorCol, len(t.content.Rows),
-			func() int {
-				if t.cursorRow >= 0 && t.cursorRow < len(t.content.Rows) {
-					return len(t.content.Rows[t.cursorRow].Cells)
-				} else {
-					return -1
-				}
-			}()))
+		if t.debug {
+			println(fmt.Sprintf("WARNING: handleOutputRune final bounds check failed - cursorRow:%d cursorCol:%d rowsLen:%d cellsLen:%d",
+				t.cursorRow, t.cursorCol, len(t.content.Rows),
+				func() int {
+					if t.cursorRow >= 0 && t.cursorRow < len(t.content.Rows) {
+						return len(t.content.Rows[t.cursorRow].Cells)
+					} else {
+						return -1
+					}
+				}()))
+		}
 	}
 
 	// Advance cursor/defer wrap according to xterm rules
