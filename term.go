@@ -106,8 +106,6 @@ type Terminal struct {
 	widget.BaseWidget
 	fyne.ShortcutHandler
 
-	Driver fyne.Driver
-
 	content        *widget2.TermGrid
 	config         Config
 	listenerLock   sync.Mutex
@@ -130,6 +128,8 @@ type Terminal struct {
 	savedRow, savedCol         int
 	scrollTop, scrollBottom    int
 	cursorChangeCallback       func(x, y int)
+
+	lastDoubleTapTime time.Time
 
 	// Theme override for ANSI colors
 	customTheme fyne.Theme
@@ -267,7 +267,7 @@ func (t *Terminal) RegisterOSCHandler(command int, handler func(data string)) {
 	t.oscHandlers[command] = handler
 }
 
-// MinSize provides a size large enough that a terminal could technically funcion.
+// MinSize provides a size large enough that a terminal could technically function.
 func (t *Terminal) MinSize() fyne.Size {
 	s := t.guessCellSize()
 	return fyne.NewSize(s.Width*2.5, s.Height*1.2) // just enough to get a terminal init
@@ -312,6 +312,15 @@ func (t *Terminal) MouseUp(ev *desktop.MouseEvent) {
 
 // DoubleTapped handles the double tapped event.
 func (t *Terminal) DoubleTapped(pe *fyne.PointEvent) {
+	// Support quad-tap for copy-whole-screen
+	if time.Since(t.lastDoubleTapTime) < 500*time.Millisecond {
+		fyne.CurrentApp().Clipboard().SetContent(t.Text())
+		t.clearSelectedText()
+		return
+	} else {
+		t.lastDoubleTapTime = time.Now()
+	}
+
 	pos := t.sanitizePosition(pe.Position)
 	termPos := t.getTermPosition(*pos)
 	row, col := termPos.Row, termPos.Col
@@ -634,7 +643,7 @@ func (t *Terminal) guessCellSize() fyne.Size {
 	}
 
 	// Cell size not in cache - measure it and store for future use
-	cellSize, _ := t.Driver.RenderedTextSize("M", fontSize, fyne.TextStyle{Monospace: true}, baseTheme.Font(fyne.TextStyle{Monospace: true}))
+	cellSize, _ := fyne.CurrentApp().Driver().RenderedTextSize("M", fontSize, fyne.TextStyle{Monospace: true}, baseTheme.Font(fyne.TextStyle{Monospace: true}))
 	size := fyne.NewSize(float32(math.Round(float64(cellSize.Width))), float32(math.Round(float64(cellSize.Height))))
 
 	// Store in shared lookup table for future use by any terminal
@@ -874,7 +883,7 @@ func (t *Terminal) initFontLookup() {
 		}
 
 		// Measure and cache this font size
-		cellSize, _ := t.Driver.RenderedTextSize("M", fontSize, fyne.TextStyle{Monospace: true}, baseTheme.Font(fyne.TextStyle{Monospace: true}))
+		cellSize, _ := fyne.CurrentApp().Driver().RenderedTextSize("M", fontSize, fyne.TextStyle{Monospace: true}, baseTheme.Font(fyne.TextStyle{Monospace: true}))
 		size := fyne.NewSize(float32(math.Round(float64(cellSize.Width))), float32(math.Round(float64(cellSize.Height))))
 		setSharedCellSize(baseTheme, fontSize, size)
 
@@ -921,7 +930,7 @@ func (t *Terminal) chooseFixedFontSize(avail fyne.Size) int {
 		for i := minAllowedFontSize; i <= maxAllowedFontSize; i++ {
 			fontSize := float32(i)
 			if _, exists := getSharedCellSize(baseTheme, fontSize); !exists {
-				cellSize, _ := t.Driver.RenderedTextSize("M", fontSize, fyne.TextStyle{Monospace: true}, baseTheme.Font(fyne.TextStyle{Monospace: true}))
+				cellSize, _ := fyne.CurrentApp().Driver().RenderedTextSize("M", fontSize, fyne.TextStyle{Monospace: true}, baseTheme.Font(fyne.TextStyle{Monospace: true}))
 				size := fyne.NewSize(float32(math.Round(float64(cellSize.Width))), float32(math.Round(float64(cellSize.Height))))
 				setSharedCellSize(baseTheme, fontSize, size)
 			}
