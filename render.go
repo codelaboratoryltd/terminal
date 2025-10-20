@@ -197,20 +197,19 @@ func (r *render) Refresh() {
 	r.moveCursor()
 	r.term.refreshCursor()
 
-	// Keep background color in sync with theme and refresh to clear outside grid
+	// Keep background colour in sync with theme
 	if r.bg != nil {
 		r.bg.FillColor = r.getBackgroundColor()
-		r.bg.Refresh()
 	}
 	if r.border != nil && r.term.borderEnabled {
 		r.border.StrokeColor = r.term.borderColor
-		r.border.Refresh()
 	}
-	// Keep PTY background color in sync and refresh
+
+	// Keep PTY background colour in sync
 	if r.ptyBackground != nil {
 		r.ptyBackground.FillColor = r.getPTYBackgroundColor()
-		r.ptyBackground.Refresh()
 	}
+
 	if r.term.content != nil {
 		r.term.content.Refresh()
 	}
