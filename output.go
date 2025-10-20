@@ -423,7 +423,9 @@ func (t *Terminal) handleOutputChar(r rune) {
 		return
 	}
 
-	cellStyle := widget2.NewTermTextGridStyle(t.currentFG, t.currentBG, highlightBitMask, t.blinking, t.bold, t.underlined)
+	// Ensure underscores are extra-visible: also apply underline style to underscore glyphs
+	underArg := t.underlined || r == '_'
+	cellStyle := widget2.NewTermTextGridStyle(t.currentFG, t.currentBG, highlightBitMask, t.blinking, t.bold, underArg)
 	for len(t.content.Rows[t.cursorRow].Cells)-1 < t.cursorCol {
 		newCell := widget.TextGridCell{
 			Rune:  ' ',
@@ -433,7 +435,7 @@ func (t *Terminal) handleOutputChar(r rune) {
 	}
 
 	if t.blinking {
-		cellStyle = widget2.NewTermTextGridStyle(t.currentFG, t.currentBG, highlightBitMask, t.blinking, t.bold, t.underlined)
+		cellStyle = widget2.NewTermTextGridStyle(t.currentFG, t.currentBG, highlightBitMask, t.blinking, t.bold, underArg)
 	}
 
 	// Place the character at the current position (manually to avoid TextGrid internal assumptions)
