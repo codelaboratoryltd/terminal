@@ -753,25 +753,37 @@ func (t *Terminal) Write(b []byte) (int, error) {
 }
 
 func (t *Terminal) setupShortcuts() {
-	var paste fyne.Shortcut
-	paste = &desktop.CustomShortcut{KeyName: fyne.KeyV, Modifier: fyne.KeyModifierShift | fyne.KeyModifierShortcutDefault}
+	// == PASTE == //
 	if runtime.GOOS == "darwin" {
-		paste = &fyne.ShortcutPaste{} // we look up clipboard later
+		// MacOS apparently doesn't support custom shortcuts that use `insert` for some reason, so we do this
+		t.ShortcutHandler.AddShortcut(&fyne.ShortcutPaste{},
+			func(_ fyne.Shortcut) {
+				fmt.Println("Insert Darwin")
+				t.pasteText(fyne.CurrentApp().Clipboard())
+			},
+		)
+	} else {
+		t.ShortcutHandler.AddShortcut(
+			&desktop.CustomShortcut{KeyName: fyne.KeyInsert, Modifier: fyne.KeyModifierShift},
+			func(_ fyne.Shortcut) {
+				fmt.Println("Insert")
+				t.pasteText(fyne.CurrentApp().Clipboard())
+			},
+		)
 	}
-	t.ShortcutHandler.AddShortcut(paste,
+	t.ShortcutHandler.AddShortcut(
+		&desktop.CustomShortcut{KeyName: fyne.KeyV, Modifier: fyne.KeyModifierShift | fyne.KeyModifierShortcutDefault},
 		func(_ fyne.Shortcut) {
+			fmt.Println("V")
 			t.pasteText(fyne.CurrentApp().Clipboard())
-		})
-	var shortcutCopy fyne.Shortcut
-	shortcutCopy = &desktop.CustomShortcut{KeyName: fyne.KeyC, Modifier: fyne.KeyModifierShift | fyne.KeyModifierShortcutDefault}
-	if runtime.GOOS == "darwin" {
-		shortcutCopy = &fyne.ShortcutCopy{} // we look up clipboard later
-	}
+		},
+	)
 
-	t.ShortcutHandler.AddShortcut(shortcutCopy,
+	// == COPY == //
+	t.ShortcutHandler.AddShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyC, Modifier: fyne.KeyModifierShift | fyne.KeyModifierShortcutDefault},
 		func(_ fyne.Shortcut) {
+			fmt.Println("C")
 			t.copySelectedText(fyne.CurrentApp().Clipboard(), false)
-
 		})
 }
 
