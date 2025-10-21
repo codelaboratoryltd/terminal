@@ -754,27 +754,27 @@ func (t *Terminal) Write(b []byte) (int, error) {
 
 func (t *Terminal) setupShortcuts() {
 	// == PASTE == //
-	if runtime.GOOS == "darwin" {
-		// MacOS apparently doesn't support custom shortcuts that use `insert` for some reason, so we do this
-		t.ShortcutHandler.AddShortcut(&fyne.ShortcutPaste{},
-			func(_ fyne.Shortcut) {
-				fmt.Println("Insert Darwin")
-				t.pasteText(fyne.CurrentApp().Clipboard())
-			},
-		)
-	} else {
+	// Handle standard paste shortcut (Ctrl+V or Cmd+V depending on platform)
+	t.ShortcutHandler.AddShortcut(&fyne.ShortcutPaste{},
+		func(_ fyne.Shortcut) {
+			t.pasteText(fyne.CurrentApp().Clipboard())
+		},
+	)
+
+	if runtime.GOOS != "windows" {
+		// We handle shift insert in input.go due to an issue with the shortcut handler on Windows.
 		t.ShortcutHandler.AddShortcut(
 			&desktop.CustomShortcut{KeyName: fyne.KeyInsert, Modifier: fyne.KeyModifierShift},
 			func(_ fyne.Shortcut) {
-				fmt.Println("Insert")
 				t.pasteText(fyne.CurrentApp().Clipboard())
 			},
 		)
 	}
+
+	// Handle Ctrl+Shift+V shortcut (common on Linux and some Windows apps)
 	t.ShortcutHandler.AddShortcut(
 		&desktop.CustomShortcut{KeyName: fyne.KeyV, Modifier: fyne.KeyModifierShift | fyne.KeyModifierShortcutDefault},
 		func(_ fyne.Shortcut) {
-			fmt.Println("V")
 			t.pasteText(fyne.CurrentApp().Clipboard())
 		},
 	)
@@ -782,7 +782,6 @@ func (t *Terminal) setupShortcuts() {
 	// == COPY == //
 	t.ShortcutHandler.AddShortcut(&desktop.CustomShortcut{KeyName: fyne.KeyC, Modifier: fyne.KeyModifierShift | fyne.KeyModifierShortcutDefault},
 		func(_ fyne.Shortcut) {
-			fmt.Println("C")
 			t.copySelectedText(fyne.CurrentApp().Clipboard(), false)
 		})
 }

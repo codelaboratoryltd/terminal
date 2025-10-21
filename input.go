@@ -85,6 +85,16 @@ func (t *Terminal) TypedKey(e *fyne.KeyEvent) {
 }
 
 func (t *Terminal) keyTypedWithShift(e *fyne.KeyEvent) {
+	// Skip processing shift+insert as it's handled by the shortcut for paste
+	// This is crucial especially on Windows where the keyTypedWithShift function
+	// might receive the event before the shortcut handler
+	if e.Name == fyne.KeyInsert {
+		// Special handling for Shift+Insert - trigger paste directly
+		// rather than passing it to the terminal
+		t.pasteText(fyne.CurrentApp().Clipboard())
+		return
+	}
+
 	switch e.Name {
 	case fyne.KeyF1:
 		_, _ = t.in.Write([]byte{asciiEscape, '[', '2', '5', '~'})
@@ -116,8 +126,6 @@ func (t *Terminal) keyTypedWithShift(e *fyne.KeyEvent) {
 		_, _ = t.in.Write([]byte{asciiEscape, '[', '6', ';', '2', '~'})
 	case fyne.KeyHome:
 		_, _ = t.in.Write([]byte{asciiEscape, '[', '1', ';', '2', 'H'})
-	case fyne.KeyInsert:
-		_, _ = t.in.Write([]byte{asciiEscape, '[', '2', ';', '2', '~'})
 	case fyne.KeyDelete:
 		_, _ = t.in.Write([]byte{asciiEscape, '[', '3', ';', '2', '~'})
 	case fyne.KeyEnd:
@@ -162,8 +170,23 @@ func (t *Terminal) KeyUp(e *fyne.KeyEvent) {
 
 // TypedShortcut handles key combinations, we pass them on to the tty.
 func (t *Terminal) TypedShortcut(s fyne.Shortcut) {
+	// Handle paste shortcut (Ctrl+V or Cmd+V)
+	if _, ok := s.(*fyne.ShortcutPaste); ok {
+		t.ShortcutHandler.TypedShortcut(s)
+		return // Don't also send to terminal
+	}
+
 	if ds, ok := s.(*desktop.CustomShortcut); ok {
-		t.ShortcutHandler.TypedShortcut(s) // it's not clear how we can check if this consumed the event
+		if runtime.GOOS == "windows" {
+			// There is an known issue with Shift+Insert on Windows with shift-insert shortcut handler.
+			if ds.KeyName == fyne.KeyInsert && ds.Modifier == fyne.KeyModifierShift {
+				t.pasteText(fyne.CurrentApp().Clipboard())
+				t.clearSelectedText()
+				return // Don't pass to terminal
+			}
+		}
+
+		t.ShortcutHandler.TypedShortcut(s)
 
 		// handle CTRL+A to CTRL+_ and everything in-between
 		if ds.Modifier == fyne.KeyModifierControl && len(ds.KeyName) > 0 {
