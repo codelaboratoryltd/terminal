@@ -2,4 +2,5 @@
 .DS_Store
 
 cmd/fyneterm/fyneterm*
+bin
 
