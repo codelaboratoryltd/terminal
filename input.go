@@ -170,11 +170,14 @@ func (t *Terminal) KeyUp(e *fyne.KeyEvent) {
 
 // TypedShortcut handles key combinations, we pass them on to the tty.
 func (t *Terminal) TypedShortcut(s fyne.Shortcut) {
-	// Handle paste shortcut (Ctrl+V or Cmd+V)
-	if _, ok := s.(*fyne.ShortcutPaste); ok {
-		t.ShortcutHandler.TypedShortcut(s)
-		return // Don't also send to terminal
-	}
+	// Disable standard paste shortcut due to cars+ reliance on ^V for the hot-menu
+	/*
+		// Handle paste shortcut (Ctrl+V or Cmd+V)
+		if _, ok := s.(*fyne.ShortcutPaste); ok {
+			t.ShortcutHandler.TypedShortcut(s)
+			return // Don't also send to terminal
+		}
+	*/
 
 	if ds, ok := s.(*desktop.CustomShortcut); ok {
 		if runtime.GOOS == "windows" {

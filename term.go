@@ -754,12 +754,16 @@ func (t *Terminal) Write(b []byte) (int, error) {
 
 func (t *Terminal) setupShortcuts() {
 	// == PASTE == //
-	// Handle standard paste shortcut (Ctrl+V or Cmd+V depending on platform)
-	t.ShortcutHandler.AddShortcut(&fyne.ShortcutPaste{},
-		func(_ fyne.Shortcut) {
-			t.pasteText(fyne.CurrentApp().Clipboard())
-		},
-	)
+
+	// Disable standard paste shortcut due to cars+ reliance on ^V for the hot-menu
+	/*
+		// Handle standard paste shortcut (Ctrl+V or Cmd+V depending on platform)
+		t.ShortcutHandler.AddShortcut(&fyne.ShortcutPaste{},
+			func(_ fyne.Shortcut) {
+				t.pasteText(fyne.CurrentApp().Clipboard())
+			},
+		)
+	*/
 
 	if runtime.GOOS != "windows" {
 		// We handle shift insert in input.go due to an issue with the shortcut handler on Windows.
