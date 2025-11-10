@@ -5,7 +5,7 @@ go 1.23.0
 toolchain go1.24.2
 
 require (
-	fyne.io/fyne/v2 v2.6.1
+	fyne.io/fyne/v2 v2.6.3
 	github.com/ActiveState/termtest/conpty v0.5.0
 	github.com/creack/pty v1.1.24
 	github.com/stretchr/testify v1.10.0

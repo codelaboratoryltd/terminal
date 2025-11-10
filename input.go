@@ -214,21 +214,19 @@ func (t *Terminal) TypedShortcut(s fyne.Shortcut) {
 	} else {
 		// we need to override the default ctrl-X/C/V/A for non-mac and do it ourselves
 
-		if _, ok := s.(*fyne.ShortcutCut); ok {
+		switch s.(type) {
+		case *fyne.ShortcutCut:
 			_, _ = t.in.Write([]byte{0x18})
-
-		} else if _, ok := s.(*fyne.ShortcutCopy); ok {
+		case *fyne.ShortcutCopy:
 			_, _ = t.in.Write([]byte{0x3})
-
-		} else if _, ok := s.(*fyne.ShortcutPaste); ok {
+		case *fyne.ShortcutPaste:
 			_, _ = t.in.Write([]byte{0x16})
-
-		} else if _, ok := s.(*fyne.ShortcutUndo); ok {
-			_, _ = t.in.Write([]byte{0x1a})
-
-		} else if _, ok := s.(*fyne.ShortcutSelectAll); ok {
+		case *fyne.ShortcutSelectAll:
 			_, _ = t.in.Write([]byte{0x1})
-
+		case *fyne.ShortcutUndo:
+			_, _ = t.in.Write([]byte{0x1a})
+		case *fyne.ShortcutRedo:
+			_, _ = t.in.Write([]byte{0x19})
 		}
 	}
 }
