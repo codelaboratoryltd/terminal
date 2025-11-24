@@ -170,42 +170,36 @@ func (t *Terminal) KeyUp(e *fyne.KeyEvent) {
 
 // TypedShortcut handles key combinations, we pass them on to the tty.
 func (t *Terminal) TypedShortcut(s fyne.Shortcut) {
-	// Disable standard paste shortcut due to cars+ reliance on ^V for the hot-menu
-	/*
-		// Handle paste shortcut (Ctrl+V or Cmd+V)
-		if _, ok := s.(*fyne.ShortcutPaste); ok {
+	switch s.(type) {
+	case *fyne.ShortcutPaste:
+		sc, _ := s.(*fyne.ShortcutPaste)
+		if sc.Secondary {
+			// Only Shift-Insert is allowed to paste, Control+V will be handled further down
+			// where we pass it directly to the terminal
+			t.pasteText(fyne.CurrentApp().Clipboard())
+			t.clearSelectedText()
+			return
+		}
+	case *desktop.CustomShortcut:
+		if ds, ok := s.(*desktop.CustomShortcut); ok {
 			t.ShortcutHandler.TypedShortcut(s)
-			return // Don't also send to terminal
-		}
-	*/
 
-	if ds, ok := s.(*desktop.CustomShortcut); ok {
-		if runtime.GOOS == "windows" {
-			// There is an known issue with Shift+Insert on Windows with shift-insert shortcut handler.
-			if ds.KeyName == fyne.KeyInsert && ds.Modifier == fyne.KeyModifierShift {
-				t.pasteText(fyne.CurrentApp().Clipboard())
-				t.clearSelectedText()
-				return // Don't pass to terminal
+			// handle CTRL+A to CTRL+_ and everything in-between
+			if ds.Modifier == fyne.KeyModifierControl && len(ds.KeyName) > 0 {
+				char := ds.KeyName[0]
+				off := char - 'A' + 1
+				switch {
+				case ds.Key() == fyne.KeySpace:
+					fallthrough
+				case ds.Key() == "@":
+					off = 0
+					fallthrough
+				case char >= 'A' && char <= '_':
+					_, _ = t.in.Write([]byte{off})
+				}
 			}
+			return
 		}
-
-		t.ShortcutHandler.TypedShortcut(s)
-
-		// handle CTRL+A to CTRL+_ and everything in-between
-		if ds.Modifier == fyne.KeyModifierControl && len(ds.KeyName) > 0 {
-			char := ds.KeyName[0]
-			off := char - 'A' + 1
-			switch {
-			case ds.Key() == fyne.KeySpace:
-				fallthrough
-			case ds.Key() == "@":
-				off = 0
-				fallthrough
-			case char >= 'A' && char <= '_':
-				_, _ = t.in.Write([]byte{off})
-			}
-		}
-		return
 	}
 
 	if runtime.GOOS == "darwin" {
@@ -213,7 +207,6 @@ func (t *Terminal) TypedShortcut(s fyne.Shortcut) {
 		t.ShortcutHandler.TypedShortcut(s)
 	} else {
 		// we need to override the default ctrl-X/C/V/A for non-mac and do it ourselves
-
 		switch s.(type) {
 		case *fyne.ShortcutCut:
 			_, _ = t.in.Write([]byte{0x18})
