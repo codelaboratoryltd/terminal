@@ -426,12 +426,15 @@ func (t *Terminal) handleOutputChar(r rune) {
 	// Ensure underscores are extra-visible: also apply underline style to underscore glyphs
 	underArg := t.underlined || r == '_'
 	cellStyle := widget2.NewTermTextGridStyle(t.currentFG, t.currentBG, highlightBitMask, t.blinking, t.bold, underArg)
+
+	// Force the row to have columns that fill the PTY size, this is to avoid the terminal
+	// having blank areas where it should be background colour filled. No cell = no background.
+	blankCell := widget.TextGridCell{
+		Rune:  ' ',
+		Style: cellStyle,
+	}
 	for len(t.content.Rows[t.cursorRow].Cells)-1 < t.cursorCol {
-		newCell := widget.TextGridCell{
-			Rune:  ' ',
-			Style: cellStyle,
-		}
-		t.content.Rows[t.cursorRow].Cells = append(t.content.Rows[t.cursorRow].Cells, newCell)
+		t.content.Rows[t.cursorRow].Cells = append(t.content.Rows[t.cursorRow].Cells, blankCell)
 	}
 
 	if t.blinking {
