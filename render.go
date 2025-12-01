@@ -2,7 +2,6 @@ package terminal
 
 import (
 	"context"
-	"fmt"
 	"image/color"
 	"time"
 
