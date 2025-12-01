@@ -27,17 +27,8 @@ type render struct {
 }
 
 func (r *render) Layout(s fyne.Size) {
-	// Layout debug logging disabled to prevent spam
-	// if r.term.debug {
-	// 	println(fmt.Sprintf("Terminal Layout Debug: [%p] Layout called with size %.1fx%.1f", r.term, s.Width, s.Height))
-	// }
+	// Compute grid size from cell size and configured rows/cols.
 
-	// Ensure background covers the full widget area to clear stale canvas content
-	if r.bg != nil {
-		r.bg.Move(fyne.NewPos(0, 0))
-		r.bg.Resize(s)
-	}
-	// Compute grid size from cell size and configured rows/cols
 	// Always keep a wrapper so we can drive text size reliably
 	if r.term.contentThemer == nil {
 		// Use the terminal's custom theme if set, otherwise fall back to app theme
@@ -51,17 +42,16 @@ func (r *render) Layout(s fyne.Size) {
 			textSize:        baseSize,
 			backgroundColor: r.getPTYBackgroundColor(),
 		}
-		if r.term.debug {
-			//println(fmt.Sprintf("Terminal Layout Debug: [%p] Created contentThemer with base size %.1f from theme %T (custom=%t)",
-			//	r.term, r.term.contentThemer.textSize, baseTheme, r.term.customTheme != nil))
-		}
 	}
 	if r.term.contentWrapper == nil {
 		r.term.contentWrapper = container.NewThemeOverride(r.term.content, r.term.contentThemer)
 	}
+
+	// Fixed font size mode: pick a fixed font size based on the canvas/grid size
+	var sizeChanged bool
 	if r.term.fixedPTY {
 		// Only recalculate font size if widget size has changed
-		sizeChanged := r.term.lastLayoutSize.Width != s.Width || r.term.lastLayoutSize.Height != s.Height
+		sizeChanged = r.term.lastLayoutSize.Width != s.Width || r.term.lastLayoutSize.Height != s.Height
 		if sizeChanged {
 			// Pick best font size for current canvas size
 			best := r.term.chooseFixedFontSize(s)
@@ -72,23 +62,26 @@ func (r *render) Layout(s fyne.Size) {
 			r.term.lastLayoutSize = s // Cache the size to avoid redundant calculations
 
 			if r.term.contentThemer.textSize != float32(best) {
-				// Font size debug only on actual changes to reduce spam
-				if r.term.debug {
-					println(fmt.Sprintf("Terminal Layout Debug: [%p] Updating font size from %.1f to %d (selected %d)",
-						r.term, r.term.contentThemer.textSize, best, best))
-				}
 				r.term.contentThemer.textSize = float32(best)
 				r.term.invalidateCellCache()
-				// Force immediate refresh without fyne.Do to ensure font changes apply
+
+				// Force immediate refresh
 				if r.term.contentWrapper != nil {
-					r.term.contentWrapper.Refresh()
+					fyne.Do(func() {
+						r.term.contentWrapper.Refresh()
+					})
 				}
+
 				// Force the content to re-render immediately with new font
 				if r.term.content != nil {
-					r.term.content.Refresh()
+					fyne.Do(func() {
+						r.term.content.Refresh()
+					})
 				}
 			}
 		} else if r.term.fixedFontSize == 0 {
+			// TODO: We never seem to use this code?
+
 			// First time initialization - ensure we have a font size
 			best := r.term.chooseFixedFontSize(s)
 			if best <= 0 {
@@ -101,10 +94,14 @@ func (r *render) Layout(s fyne.Size) {
 				r.term.contentThemer.textSize = float32(best)
 				r.term.invalidateCellCache()
 				if r.term.contentWrapper != nil {
-					r.term.contentWrapper.Refresh()
+					fyne.Do(func() {
+						r.term.contentWrapper.Refresh()
+					})
 				}
 				if r.term.content != nil {
-					r.term.content.Refresh()
+					fyne.Do(func() {
+						r.term.content.Refresh()
+					})
 				}
 			}
 		}
@@ -112,12 +109,8 @@ func (r *render) Layout(s fyne.Size) {
 		// Not in fixed mode: sync to base theme size (offsets will be calculated later)
 		baseSize := r.term.Theme().Size(theme.SizeNameText)
 		if r.term.contentThemer.textSize != baseSize {
-			// Dynamic font size debug only on actual changes to reduce spam
-			if r.term.debug {
-				println(fmt.Sprintf("Terminal Layout Debug: [%p] Updating dynamic font size from %.1f to %.1f",
-					r.term, r.term.contentThemer.textSize, baseSize))
-			}
 			r.term.contentThemer.textSize = baseSize
+			sizeChanged = true
 			r.term.invalidateCellCache()
 			if r.term.contentWrapper != nil {
 				// Schedule refresh on main thread to avoid Fyne thread errors
@@ -128,15 +121,14 @@ func (r *render) Layout(s fyne.Size) {
 		}
 	}
 
+	if !sizeChanged {
+		// Don't need to recalculate anything else if we're not changing the font size
+		return
+	}
+
 	cell := r.term.guessCellSize()
 	gridWidth := float32(r.term.config.Columns) * cell.Width
 	gridHeight := float32(r.term.config.Rows) * cell.Height
-
-	// Grid calculation debug disabled to prevent spam
-	// if r.term.debug {
-	//	println(fmt.Sprintf("Terminal Layout Debug: Grid size calculation: %dx%d cells * %.1fx%.1f cell size = %.1fx%.1f grid",
-	//		r.term.config.Columns, r.term.config.Rows, cell.Width, cell.Height, gridWidth, gridHeight))
-	// }
 
 	// Center within available size if there is extra room
 	r.term.offsetX = 0

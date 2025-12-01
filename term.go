@@ -610,7 +610,6 @@ func (t *Terminal) close() error {
 }
 
 // guessCellSize is called extremely frequently, so we use a shared lookup table for efficiency
-// guessCellSize is called extremely frequently, so we use a shared lookup table for efficiency
 func (t *Terminal) guessCellSize() fyne.Size {
 	// Determine the effective theme and font size
 	var baseTheme fyne.Theme
