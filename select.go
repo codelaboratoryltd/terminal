@@ -1,6 +1,8 @@
 package terminal
 
 import (
+	"strings"
+
 	"fyne.io/fyne/v2"
 
 	widget2 "github.com/fyne-io/terminal/internal/widget"
@@ -75,6 +77,9 @@ func (t *Terminal) copySelectedText(clipboard fyne.Clipboard, clearSelection boo
 
 func (t *Terminal) pasteText(clipboard fyne.Clipboard) {
 	content := clipboard.Content()
+
+	// Terminal expect \r not \n in pasted text
+	content = strings.ReplaceAll(content, "\n", "\r")
 
 	if t.bracketedPasteMode {
 		// In bracketed paste mode, wrap content with escape sequences

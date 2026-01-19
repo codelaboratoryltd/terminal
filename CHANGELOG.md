@@ -5,6 +5,10 @@ This project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased] - 2025-09-16
 
+## [0.1.4]
+### Fixed
+ - Fix multi-line paste
+
 ## [0.1.3]
 ### Fixed
  - Fix region scrolling
