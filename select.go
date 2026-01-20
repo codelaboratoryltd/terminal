@@ -78,7 +78,8 @@ func (t *Terminal) copySelectedText(clipboard fyne.Clipboard, clearSelection boo
 func (t *Terminal) pasteText(clipboard fyne.Clipboard) {
 	content := clipboard.Content()
 
-	// Terminal expect \r not \n in pasted text
+	// Normalise line endings for terminal
+	content = strings.ReplaceAll(content, "\r\n", "\r")
 	content = strings.ReplaceAll(content, "\n", "\r")
 
 	if t.bracketedPasteMode {

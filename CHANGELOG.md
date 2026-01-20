@@ -5,6 +5,10 @@ This project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased] - 2025-09-16
 
+## [0.1.25]
+### Fixed
+ - Another fix multi-line paste (previous one worked only for MacOS and Linux)
+
 ## [0.1.24]
 ### Fixed
  - Fix multi-line paste
