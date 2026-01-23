@@ -179,11 +179,17 @@ type TermTextGridStyle struct {
 
 // Style is the text style a cell should use.
 func (h *TermTextGridStyle) Style() fyne.TextStyle {
+	if h == nil {
+		return fyne.TextStyle{}
+	}
 	return h.TextStyle
 }
 
 // TextColor returns the color of the text, depending on whether it is highlighted.
 func (h *TermTextGridStyle) TextColor() color.Color {
+	if h == nil {
+		return nil
+	}
 	if h.Highlighted {
 		if h.blinked {
 			return h.InvertedBackgroundColor
@@ -201,6 +207,9 @@ func (h *TermTextGridStyle) TextColor() color.Color {
 
 // BackgroundColor returns the background color, depending on whether it is highlighted.
 func (h *TermTextGridStyle) BackgroundColor() color.Color {
+	if h == nil {
+		return nil
+	}
 	if h.Highlighted {
 		return h.InvertedBackgroundColor
 	}
@@ -208,6 +217,9 @@ func (h *TermTextGridStyle) BackgroundColor() color.Color {
 }
 
 func (h *TermTextGridStyle) blink(b bool) {
+	if h == nil {
+		return
+	}
 	h.blinked = b
 }
 
@@ -242,12 +254,12 @@ func NewTermTextGridStyle(fg, bg color.Color, bitmask byte, blinkEnabled, bold, 
 	// calculate the inverted colors
 	var invertedFg, invertedBg color.Color
 	if fg == nil {
-		invertedFg = invertColor(theme.Color(theme.ColorNameForeground), bitmask)
+		invertedFg = invertColor(safeThemeColor(theme.ColorNameForeground), bitmask)
 	} else {
 		invertedFg = invertColor(fg, bitmask)
 	}
 	if bg == nil {
-		invertedBg = invertColor(theme.Color(theme.ColorNameBackground), bitmask)
+		invertedBg = invertColor(safeThemeColor(theme.ColorNameBackground), bitmask)
 	} else {
 		invertedBg = invertColor(bg, bitmask)
 	}
@@ -267,6 +279,21 @@ func NewTermTextGridStyle(fg, bg color.Color, bitmask byte, blinkEnabled, bold, 
 			Symbol:    false,
 		},
 	}
+}
+
+func safeThemeColor(name fyne.ThemeColorName) (col color.Color) {
+	defer func() {
+		if r := recover(); r != nil {
+			col = theme.DarkTheme().Color(name, theme.VariantDark)
+		}
+	}()
+
+	col = theme.Color(name)
+	if col == nil {
+		return theme.DarkTheme().Color(name, theme.VariantDark)
+	}
+
+	return col
 }
 
 // invertColor inverts a color c with the given bitmask

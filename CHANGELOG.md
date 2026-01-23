@@ -5,6 +5,10 @@ This project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased] - 2025-09-16
 
+## [0.1.26]
+### Fixed
+- Protect against nil values with styles and themes
+
 ## [0.1.25]
 ### Fixed
  - Another fix multi-line paste (previous one worked only for MacOS and Linux)
