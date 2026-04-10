@@ -2,8 +2,8 @@ package terminal
 
 import (
 	"bytes"
-	"fmt"
 	"log"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -17,7 +17,6 @@ const (
 	asciiBackspace = 8
 	asciiEscape    = 27
 
-	noEscape = 5000
 	tabWidth = 8
 )
 
@@ -86,15 +85,19 @@ var decSpecialGraphics = map[rune]rune{
 }
 
 type parseState struct {
-	code          string
-	esc           int
-	osc           bool
-	vt100         rune
-	apc           bool
-	dcs           bool
-	printing      bool
+	code string
+	// csiCode accumulates CSI bytes without per-rune string allocations (see parseEscape).
+	csiCode strings.Builder
+	// afterEsc is set when ESC (0x1b) was read; the next rune is dispatched to parseEscState.
+	// This avoids byte-offset tracking that breaks across PTY read boundaries.
+	afterEsc bool
+	osc      bool
+	vt100    rune
+	apc      bool
+	dcs      bool
+	printing bool
 	dcsEscPending bool
-	csi           bool
+	csi      bool // CSI parameters: from ESC [ or from 8-bit C1 CSI (0x9b)
 }
 
 func (t *Terminal) handleOutput(buf []byte) []byte {
@@ -102,14 +105,11 @@ func (t *Terminal) handleOutput(buf []byte) []byte {
 		t.clearSelectedText()
 	}
 	if t.state == nil {
-		t.state = &parseState{
-			esc: noEscape,
-		}
+		t.state = &parseState{}
 	}
 	var (
 		size int
 		r    rune
-		i    = -1
 	)
 	if t.trace != nil && len(buf) > 0 {
 		// Log raw bytes in hex for debugging
@@ -127,7 +127,6 @@ func (t *Terminal) handleOutput(buf []byte) []byte {
 	}
 
 	for {
-		i += size
 		buf = buf[size:]
 		r, size = utf8.DecodeRune(buf)
 		if size == 0 {
@@ -153,14 +152,14 @@ func (t *Terminal) handleOutput(buf []byte) []byte {
 			if t.cursorRow < t.scrollBottom {
 				t.moveCursor(t.cursorRow+1, t.cursorCol)
 			} else {
-				fyne.Do(t.scrollDown)
+				t.scrollDown()
 			}
 			continue
 		case 0x85: // NEL
 			if t.cursorRow < t.scrollBottom {
 				t.moveCursor(t.cursorRow+1, 0)
 			} else {
-				fyne.Do(t.scrollDown)
+				t.scrollDown()
 				t.moveCursor(t.scrollBottom, 0)
 			}
 			continue
@@ -168,13 +167,15 @@ func (t *Terminal) handleOutput(buf []byte) []byte {
 			if t.cursorRow > t.scrollTop {
 				t.moveCursor(t.cursorRow-1, t.cursorCol)
 			} else {
-				fyne.Do(t.scrollUp)
+				t.scrollUp()
 			}
 			continue
 		case 0x90: // DCS
 			t.state.dcs = true
 			continue
 		case 0x9b: // CSI
+			t.state.code = ""
+			t.state.csiCode.Reset()
 			t.state.csi = true
 			continue
 		case 0x9d: // OSC
@@ -205,22 +206,24 @@ func (t *Terminal) handleOutput(buf []byte) []byte {
 			t.parseDCS(r)
 			continue
 		}
-		if t.state.csi {
-			t.parseEscape(r)
-			if t.state.esc == noEscape {
-				t.state.csi = false
-			}
-			continue
-		}
 		if r == asciiEscape {
-			t.state.esc = i
+			if t.state.csi {
+				t.state.csi = false
+				t.state.code = ""
+				t.state.csiCode.Reset()
+			}
+			t.state.afterEsc = true
 			continue
 		}
-		if t.state.esc == i-1 {
+		if t.state.afterEsc {
+			t.state.afterEsc = false
 			if cont := t.parseEscState(r); cont {
 				continue
 			}
-			t.state.esc = noEscape
+			continue
+		}
+		if t.state.csi {
+			t.parseEscape(r)
 			continue
 		}
 		if t.state.apc {
@@ -233,9 +236,6 @@ func (t *Terminal) handleOutput(buf []byte) []byte {
 		} else if t.state.vt100 != 0 {
 			t.handleVT100(string([]rune{t.state.vt100, r}))
 			t.state.vt100 = 0
-			continue
-		} else if t.state.esc != noEscape {
-			t.parseEscape(r)
 			continue
 		}
 
@@ -254,16 +254,14 @@ func (t *Terminal) handleOutput(buf []byte) []byte {
 		}
 	}
 
-	// record progress for next chunk of buffer
-	if t.state.esc != noEscape {
-		t.state.esc = t.state.esc - i
-	}
 	return buf
 }
 
 func (t *Terminal) parseEscState(r rune) (shouldContinue bool) {
 	switch r {
 	case '[':
+		t.state.csiCode.Reset()
+		t.state.csi = true
 		return true
 	case '\\':
 		if t.state.osc {
@@ -328,11 +326,11 @@ func (t *Terminal) parseEscState(r rune) (shouldContinue bool) {
 func (t *Terminal) parseEscape(r rune) {
 	// Accumulate all CSI parameter and intermediate bytes until we reach a final byte.
 	// CSI grammar: parameters 0x30-0x3F, intermediates 0x20-0x2F, final 0x40-0x7E.
-	t.state.code += string(r)
+	_, _ = t.state.csiCode.WriteRune(r)
 	if r >= '@' && r <= '~' { // final byte reached
-		t.handleEscape(t.state.code)
-		t.state.code = ""
-		t.state.esc = noEscape
+		t.handleEscape(t.state.csiCode.String())
+		t.state.csiCode.Reset()
+		t.state.csi = false
 	}
 }
 
@@ -346,7 +344,9 @@ func (t *Terminal) parsePrinting(buf []byte, size int) {
 			if i+3 < size && buf[i+1] == '[' && buf[i+2] == '4' && buf[i+3] == 'i' {
 				// Found complete ESC[4i sequence, end printing mode
 				escapePrinterMode(t, "4")
-				t.state.esc = noEscape
+				t.state.afterEsc = false
+				t.state.csi = false
+				t.state.csiCode.Reset()
 				return
 			}
 			// Not the end sequence, add to print data
@@ -363,7 +363,9 @@ func (t *Terminal) parsePrinting(buf []byte, size int) {
 		// Remove the escape sequence and end printing
 		t.printData = t.printData[:len(t.printData)-4]
 		escapePrinterMode(t, "4")
-		t.state.esc = noEscape
+		t.state.afterEsc = false
+		t.state.csi = false
+		t.state.csiCode.Reset()
 	}
 }
 
@@ -415,39 +417,21 @@ func (t *Terminal) handleOutputChar(r rune) {
 		t.content.Rows = append(t.content.Rows, widget.TextGridRow{})
 	}
 
-	// Safety check: ensure cursorRow is within bounds
-	if t.cursorRow < 0 || t.cursorRow >= len(t.content.Rows) {
-		println(fmt.Sprintf("WARNING: handleOutputRune cursorRow %d out of bounds for Rows length %d", t.cursorRow, len(t.content.Rows)))
+	if t.cursorRow < 0 || t.cursorRow >= len(t.content.Rows) || t.cursorCol < 0 {
 		return
 	}
 
+	row := &t.content.Rows[t.cursorRow]
 	cellStyle := widget2.NewTermTextGridStyle(t.currentFG, t.currentBG, highlightBitMask, t.blinking, t.bold, t.underlined)
-	for len(t.content.Rows[t.cursorRow].Cells)-1 < t.cursorCol {
-		newCell := widget.TextGridCell{
+	for len(row.Cells)-1 < t.cursorCol {
+		row.Cells = append(row.Cells, widget.TextGridCell{
 			Rune:  ' ',
 			Style: cellStyle,
-		}
-		t.content.Rows[t.cursorRow].Cells = append(t.content.Rows[t.cursorRow].Cells, newCell)
+		})
 	}
 
-	if t.blinking {
-		cellStyle = widget2.NewTermTextGridStyle(t.currentFG, t.currentBG, highlightBitMask, t.blinking, t.bold, t.underlined)
-	}
-
-	// Place the character at the current position (manually to avoid TextGrid internal assumptions)
-	// Double-check bounds again before final access
-	if t.cursorRow >= 0 && t.cursorRow < len(t.content.Rows) && t.cursorCol >= 0 && t.cursorCol < len(t.content.Rows[t.cursorRow].Cells) {
-		t.content.Rows[t.cursorRow].Cells[t.cursorCol] = widget.TextGridCell{Rune: r, Style: cellStyle}
-	} else {
-		println(fmt.Sprintf("WARNING: handleOutputRune final bounds check failed - cursorRow:%d cursorCol:%d rowsLen:%d cellsLen:%d",
-			t.cursorRow, t.cursorCol, len(t.content.Rows),
-			func() int {
-				if t.cursorRow >= 0 && t.cursorRow < len(t.content.Rows) {
-					return len(t.content.Rows[t.cursorRow].Cells)
-				} else {
-					return -1
-				}
-			}()))
+	if t.cursorCol < len(row.Cells) {
+		row.Cells[t.cursorCol] = widget.TextGridCell{Rune: r, Style: cellStyle}
 	}
 
 	// Advance cursor/defer wrap according to xterm rules
