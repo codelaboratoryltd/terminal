@@ -2,6 +2,7 @@ package terminal
 
 import (
 	"testing"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/widget"
@@ -163,6 +164,9 @@ func TestDoubleTapped(t *testing.T) {
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
+			// Each subtest is an independent double-tap; reset debounce so quad-tap
+			// logic does not fire between cases when the suite runs quickly.
+			term.lastDoubleTapTime = time.Time{}
 			term.clearSelectedText()
 			term.DoubleTapped(&fyne.PointEvent{
 				Position: tc.clickPosition,
