@@ -58,8 +58,9 @@ func (t *Terminal) handleEscape(code string) {
 	}
 
 	runes := []rune(code)
-	if esc, ok := escapes[runes[len(code)-1]]; ok {
-		esc(t, code[:len(code)-1])
+	last := runes[len(runes)-1]
+	if esc, ok := escapes[last]; ok {
+		esc(t, string(runes[:len(runes)-1]))
 	} else if t.debug {
 		log.Println("Unrecognised Escape:", code)
 	}
@@ -68,8 +69,8 @@ func (t *Terminal) handleEscape(code string) {
 func (t *Terminal) clearScreen() {
 	// Reset visible buffer to empty rows; rows will expand as output arrives
 	t.content.Rows = []widget.TextGridRow{}
+	t.invalidateBlinkGridCache()
 	t.moveCursor(0, 0)
-	t.content.Refresh()
 }
 
 func (t *Terminal) clearScreenFromCursor() {
@@ -189,6 +190,7 @@ func (t *Terminal) resetTerminal() {
 	t.bold = false
 	t.blinking = false
 	t.underlined = false
+	t.invalidateBlinkGridCache()
 
 	// Reset charsets
 	t.g0Charset = charSetANSII
@@ -379,6 +381,7 @@ func escapeEraseInScreen(t *Terminal, msg string) {
 		// xterm extension: Erase saved lines (scrollback). We also clear the
 		// visible screen to ensure consistent behavior inside/outside tmux.
 		t.content.Rows = []widget.TextGridRow{}
+		t.invalidateBlinkGridCache()
 		t.scrollTop = 0
 		if t.config.Rows > 0 {
 			t.scrollBottom = int(t.config.Rows) - 1
@@ -386,7 +389,6 @@ func escapeEraseInScreen(t *Terminal, msg string) {
 			t.scrollBottom = 0
 		}
 		t.moveCursor(0, 0)
-		t.content.Refresh()
 	}
 }
 
@@ -607,8 +609,8 @@ func escapePrivateMode(t *Terminal, msg string, enable bool) {
 				}
 				// clear to alternate buffer
 				t.content.Rows = []widget.TextGridRow{}
+				t.invalidateBlinkGridCache()
 				t.moveCursor(0, 0)
-				t.content.Refresh()
 			} else {
 				// Restore saved screen
 				if t.savedRows != nil {
@@ -619,10 +621,10 @@ func escapePrivateMode(t *Terminal, msg string, enable bool) {
 						rows[i] = widget.TextGridRow{Cells: cells}
 					}
 					t.content.Rows = rows
+					t.invalidateBlinkGridCache()
 					// if 1049 was set, we also restore cursor
 					t.moveCursor(t.savedCursorRow, t.savedCursorCol)
 					t.savedRows = nil
-					t.content.Refresh()
 				}
 			}
 		case "12":
@@ -830,6 +832,7 @@ func escapeSoftResetBangAware(t *Terminal, msg string) {
 		t.bold = false
 		t.blinking = false
 		t.underlined = false
+		t.invalidateBlinkGridCache()
 		// scroll region to full screen
 		t.scrollTop = 0
 		if t.config.Rows > 0 {
