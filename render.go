@@ -339,11 +339,9 @@ func (r *render) Destroy() {
 }
 
 func (r *render) moveCursor() {
-	// Safety check: ensure cursor exists before trying to move it
 	if r.term.cursor == nil {
 		return
 	}
-
 	cell := r.term.guessCellSize()
 	r.term.cursor.Move(fyne.NewPos(r.term.offsetX+cell.Width*float32(r.term.cursorCol), r.term.offsetY+cell.Height*float32(r.term.cursorRow)))
 }
