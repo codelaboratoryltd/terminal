@@ -172,6 +172,7 @@ type Terminal struct {
 	printer                Printer
 	cmd                    *exec.Cmd
 	readWriterConfigurator ReadWriterConfigurator
+	readMerge              []byte // scratch: leftOver + pty read, avoids alloc per chunk
 	keyRemap               map[fyne.KeyName]fyne.KeyName
 
 	// xterm modes/buffers
@@ -609,7 +610,7 @@ func (t *Terminal) close() error {
 	return t.pty.Close()
 }
 
-// guessCellSize is called extremely frequently, so we use a shared lookup table for efficiency
+// guessCellSize is called extremely frequently, so we use a shared lookup table for efficiency.
 func (t *Terminal) guessCellSize() fyne.Size {
 	// Determine the effective theme and font size
 	var baseTheme fyne.Theme
@@ -651,6 +652,13 @@ func (t *Terminal) guessCellSize() fyne.Size {
 	return size
 }
 
+// invalidateBlinkGridCache forces the TermGrid to rescan for blinking cells on next refresh.
+func (t *Terminal) invalidateBlinkGridCache() {
+	if t.content != nil {
+		t.content.InvalidateBlinkCache()
+	}
+}
+
 func (t *Terminal) run() {
 	buf := make([]byte, bufLen)
 	var leftOver []byte
@@ -682,10 +690,11 @@ func (t *Terminal) run() {
 		}
 
 		lenLeftOver := len(leftOver)
-		fullBuf := buf
+		fullBuf := buf[:num]
 		if lenLeftOver > 0 {
-			fullBuf = append(leftOver, buf[:num]...)
-			num += lenLeftOver
+			t.readMerge = append(append(t.readMerge[:0], leftOver...), buf[:num]...)
+			fullBuf = t.readMerge
+			num = len(t.readMerge)
 		}
 
 		if t.content == nil || t.cleaningUp {

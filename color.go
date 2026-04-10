@@ -204,6 +204,7 @@ func (t *Terminal) handleColorEscape(message string) {
 		t.bold = false
 		t.blinking = false
 		t.underlined = false
+		t.invalidateBlinkGridCache()
 		return
 	}
 	if message[0] == '>' || message[0] == '?' {
@@ -288,12 +289,14 @@ func (t *Terminal) handleColorMode(modeStr string) {
 		t.bold = false
 		t.blinking = false
 		t.underlined = false
+		t.invalidateBlinkGridCache()
 	case 1: // Bold/bright text
 		t.bold = true
 	case 4: // Underlined text
 		t.underlined = true
 	case 5: // Blinking text
 		t.blinking = true
+		t.invalidateBlinkGridCache()
 	case 24: // Not underlined - remove underline
 		t.underlined = false
 	case 7: // Reverse video - swap foreground and background colors

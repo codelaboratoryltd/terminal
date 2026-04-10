@@ -945,3 +945,42 @@ func TestHandleOutput_BufferCutoff(t *testing.T) {
 	}
 	assert.Equal(t, tg.Rows, term.content.Rows)
 }
+
+func TestHandleOutput_CSISplitAfterBracket(t *testing.T) {
+	term := New()
+	termsize := fyne.NewSize(80, 50)
+	term.Resize(termsize)
+	term.handleOutput([]byte("\x1b["))
+	term.handleOutput([]byte("37m"))
+	term.handleOutput([]byte("X"))
+	row := term.content.Row(0)
+	if assert.GreaterOrEqual(t, len(row.Cells), 1) {
+		assert.Equal(t, 'X', row.Cells[0].Rune)
+	}
+}
+
+func TestHandleOutput_escapeSplitBareThenCSI(t *testing.T) {
+	term := New()
+	termsize := fyne.NewSize(80, 50)
+	term.Resize(termsize)
+	term.handleOutput([]byte("\x1b"))
+	term.handleOutput([]byte("[31mR"))
+	row := term.content.Row(0)
+	if assert.GreaterOrEqual(t, len(row.Cells), 1) {
+		assert.Equal(t, 'R', row.Cells[0].Rune)
+		assert.NotNil(t, row.Cells[0].Style)
+	}
+}
+
+func TestHandleOutput_CSIOneByteAtATime(t *testing.T) {
+	term := New()
+	termsize := fyne.NewSize(80, 50)
+	term.Resize(termsize)
+	for _, b := range []byte("\x1b[37mZ") {
+		term.handleOutput([]byte{b})
+	}
+	row := term.content.Row(0)
+	if assert.GreaterOrEqual(t, len(row.Cells), 1) {
+		assert.Equal(t, 'Z', row.Cells[0].Rune)
+	}
+}

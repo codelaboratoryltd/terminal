@@ -5,6 +5,22 @@ This project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased] - 2025-09-16
 
+### Fixed
+- Escape and CSI parsing across PTY read boundaries (`afterEsc` / `csi`, 8-bit C1 CSI `0x9b`), with regression tests for split sequences.
+- `handleEscape` now keys the final byte by rune and passes parameter bytes as a string of preceding runes (avoids multibyte CSI mis-dispatch).
+- IND/NEL/RI (C1 and `ESC` `D`/`E`/`M`) use synchronous `scrollUp`/`scrollDown` so scroll matches further output in the same chunk.
+- `TermGrid` dispatches `TextGrid.Refresh` via `fyne.Do` for driver-thread safety; `mayContainBlink` skips full-grid scans when no blink cells.
+- Invalidate TermGrid blink cache when blink SGR or wholesale buffer clears / alt-screen switches change cell styles or content.
+
+### Changed
+- Reuse a `readMerge` scratch buffer when merging PTY leftovers with the next read (avoids allocating a new slice each chunk).
+- Accumulate CSI parameters with `strings.Builder` in `parseEscape`; minor `handleOutputChar` hot-path cleanup.
+- `scrollUp`/`scrollDown` call `content.Refresh` after mutating rows so the grid updates when a read ends with incomplete UTF-8 (no `run()` refresh that pass).
+- Ignore a root-level `fyneterm` build artifact in `.gitignore`.
+
+### Tests
+- Reset quad-tap debounce state between `select` subtests for stable `TestDoubleTapped`.
+
 ## [0.1.26]
 ### Fixed
 - Protect against nil values with styles and themes

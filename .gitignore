@@ -1,6 +1,9 @@
 .idea
 .DS_Store
 
+# Built demo binary (often produced in repo root)
+/fyneterm
+
 cmd/fyneterm/fyneterm*
 bin
 
