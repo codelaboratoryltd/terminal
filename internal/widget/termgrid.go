@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"image/color"
+	"sync/atomic"
 	"time"
 
 	"fyne.io/fyne/v2/canvas"
@@ -22,6 +23,8 @@ type TermGrid struct {
 	widget.TextGrid
 
 	tickerCancel context.CancelFunc
+	// mayContainBlink is true until a refresh finds no BlinkEnabled cells; then false skips O(n) scans.
+	mayContainBlink atomic.Bool
 }
 
 // TermGridRenderer provides custom rendering for the terminal grid with enhanced underscore visibility
@@ -144,9 +147,15 @@ func (r *TermGridRenderer) getUnderscoreColor(cell widget.TextGridCell) color.Co
 func NewTermGrid() *TermGrid {
 	grid := &TermGrid{}
 	grid.ExtendBaseWidget(grid)
+	grid.mayContainBlink.Store(true)
 
 	grid.Scroll = container.ScrollNone
 	return grid
+}
+
+// InvalidateBlinkCache forces the next refresh to scan for blinking cells (call after SGR blink changes).
+func (t *TermGrid) InvalidateBlinkCache() {
+	t.mayContainBlink.Store(true)
 }
 
 // Refresh will be called when this grid should update.
@@ -160,14 +169,23 @@ func (t *TermGrid) Refresh() {
 }
 
 func (t *TermGrid) refreshBlink(blink bool) {
-	// reset shouldBlink which can be set by setCellRune if a cell with BlinkEnabled is found
-	shouldBlink := false
-
 	// Safety check: ensure Rows is not nil before accessing
 	if t.Rows == nil {
 		return
 	}
 
+	if !t.mayContainBlink.Load() {
+		if t.tickerCancel != nil {
+			t.tickerCancel()
+			t.tickerCancel = nil
+		}
+		fyne.Do(func() {
+			t.TextGrid.Refresh()
+		})
+		return
+	}
+
+	shouldBlink := false
 	for _, row := range t.Rows {
 		if row.Cells == nil {
 			continue
@@ -175,10 +193,13 @@ func (t *TermGrid) refreshBlink(blink bool) {
 		for _, r := range row.Cells {
 			if s, ok := r.Style.(*TermTextGridStyle); ok && s != nil && s.BlinkEnabled {
 				shouldBlink = true
-
 				s.blink(blink)
 			}
 		}
+	}
+
+	if !shouldBlink {
+		t.mayContainBlink.Store(false)
 	}
 
 	fyne.Do(func() {
