@@ -10,6 +10,16 @@ import (
 
 // TypedRune is called when the user types a visible character
 func (t *Terminal) TypedRune(r rune) {
+	if t.suppressNumpadRune {
+		t.suppressNumpadRune = false
+		// Suppress the digit character that a numpad navigation key generates as a side-effect.
+		// Only suppress 2/4/6/8 — the digits produced by numpad directional keys.
+		// Any other rune clears the flag and is processed normally, which handles the case
+		// where the virtual keyboard does not emit a char event for navigation keys.
+		if r == '2' || r == '4' || r == '6' || r == '8' {
+			return
+		}
+	}
 	b := make([]byte, utf8.UTFMax)
 	size := utf8.EncodeRune(b, r)
 	_, _ = t.in.Write(b[:size])
@@ -20,6 +30,21 @@ func (t *Terminal) TypedKey(e *fyne.KeyEvent) {
 	if t.keyboardState.shiftPressed {
 		t.keyTypedWithShift(e)
 		return
+	}
+
+	// When numpad arrow key mode is enabled (tablet/on-screen keyboard support),
+	// check whether Key2/4/6/8 is from a numpad key (by hardware scan code) and
+	// if so treat it as an arrow key. Must be done before RemapKey to avoid
+	// interfering with regular number keys.
+	if t.numpadArrowKeys {
+		switch e.Name {
+		case fyne.Key2, fyne.Key4, fyne.Key6, fyne.Key8:
+			if arrowKey, ok := numpadToArrow(e, e.Name); ok {
+				t.suppressNumpadRune = true
+				t.typeCursorKey(arrowKey)
+				return
+			}
+		}
 	}
 
 	keyname := e.Name
@@ -70,7 +95,7 @@ func (t *Terminal) TypedKey(e *fyne.KeyEvent) {
 	case fyne.KeyDelete:
 		_, _ = t.in.Write([]byte{asciiEscape, '[', '3', '~'})
 	case fyne.KeyUp, fyne.KeyDown, fyne.KeyLeft, fyne.KeyRight:
-		t.typeCursorKey(e.Name)
+		t.typeCursorKey(keyname)
 	case fyne.KeyPageUp:
 		_, _ = t.in.Write([]byte{asciiEscape, '[', '5', '~'})
 	case fyne.KeyPageDown:
@@ -245,6 +270,22 @@ func (t *Terminal) typeCursorKey(key fyne.KeyName) {
 	case fyne.KeyRight:
 		_, _ = t.in.Write([]byte{asciiEscape, cursorPrefix, 'C'})
 	}
+}
+
+// SendCursorKey sends a cursor movement ANSI sequence to the terminal input, correctly
+// handling application cursor key mode (DECCKM). This allows external code (e.g. a
+// canvas-level key handler for virtual keyboards) to send arrow key input using the
+// same path as TypedKey, without hardcoding the escape sequences.
+func (t *Terminal) SendCursorKey(key fyne.KeyName) {
+	t.typeCursorKey(key)
+}
+
+// SetNumpadArrowKeys enables or disables treating numpad 2/4/6/8 keys as arrow keys.
+// Enable this for tablet or on-screen keyboard use where the virtual keyboard sends
+// numpad key codes for directional navigation. When enabled, a hardware scan code check
+// distinguishes numpad keys from regular top-row number keys on Windows.
+func (t *Terminal) SetNumpadArrowKeys(enabled bool) {
+	t.numpadArrowKeys = enabled
 }
 
 type discardWriter struct{}

@@ -5,6 +5,10 @@ This project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased] - 2025-09-16
 
+## [0.1.28]
+### Fixed
+- Fix on-screen keyboard arrow keys not working
+
 ## [0.1.27]
 ### Fixed
 - Escape and CSI parsing across PTY read boundaries (`afterEsc` / `csi`, 8-bit C1 CSI `0x9b`), with regression tests for split sequences.
