@@ -70,7 +70,7 @@ func (t *Terminal) TypedKey(e *fyne.KeyEvent) {
 	case fyne.KeyDelete:
 		_, _ = t.in.Write([]byte{asciiEscape, '[', '3', '~'})
 	case fyne.KeyUp, fyne.KeyDown, fyne.KeyLeft, fyne.KeyRight:
-		t.typeCursorKey(e.Name)
+		t.typeCursorKey(keyname)
 	case fyne.KeyPageUp:
 		_, _ = t.in.Write([]byte{asciiEscape, '[', '5', '~'})
 	case fyne.KeyPageDown:
