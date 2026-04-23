@@ -174,6 +174,8 @@ type Terminal struct {
 	readWriterConfigurator ReadWriterConfigurator
 	readMerge              []byte // scratch: leftOver + pty read, avoids alloc per chunk
 	keyRemap               map[fyne.KeyName]fyne.KeyName
+	numpadArrowKeys    bool // when true, numpad 2/4/6/8 keys act as arrow keys (tablet/on-screen keyboard mode)
+	suppressNumpadRune bool // set in TypedKey when a numpad navigation key is handled; cleared in TypedRune
 
 	// xterm modes/buffers
 	wrapAround  bool // DECSET 7
