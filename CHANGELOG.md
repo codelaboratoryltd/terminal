@@ -5,7 +5,7 @@ This project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased] - 2025-09-16
 
-## [0.1.28]
+## [0.1.30]
 ### Fixed
 - Fix on-screen keyboard arrow keys not working
 
