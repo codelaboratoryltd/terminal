@@ -60,8 +60,8 @@ func (r *render) Layout(s fyne.Size) {
 			r.term.fixedFontSize = best
 			r.term.lastLayoutSize = s // Cache the size to avoid redundant calculations
 
-			if r.term.contentThemer.textSize != float32(best) {
-				r.term.contentThemer.textSize = float32(best)
+			if r.term.contentThemer.textSize != best {
+				r.term.contentThemer.textSize = best
 				r.term.invalidateCellCache()
 
 				// Force immediate refresh
@@ -89,8 +89,8 @@ func (r *render) Layout(s fyne.Size) {
 			r.term.fixedFontSize = best
 			r.term.lastLayoutSize = s
 
-			if r.term.contentThemer.textSize != float32(best) {
-				r.term.contentThemer.textSize = float32(best)
+			if r.term.contentThemer.textSize != best {
+				r.term.contentThemer.textSize = best
 				r.term.invalidateCellCache()
 				if r.term.contentWrapper != nil {
 					fyne.Do(func() {

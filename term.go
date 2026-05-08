@@ -200,7 +200,7 @@ type Terminal struct {
 	fixedPTY       bool
 	fixedRows      uint
 	fixedCols      uint
-	fixedFontSize  int
+	fixedFontSize  float32
 	contentThemer  *ptyTheme
 	contentWrapper fyne.CanvasObject
 
@@ -620,7 +620,7 @@ func (t *Terminal) guessCellSize() fyne.Size {
 
 	if t.fixedPTY && t.fixedFontSize > 0 {
 		// Fixed PTY mode: use the computed fixed font size
-		fontSize = float32(t.fixedFontSize)
+		fontSize = t.fixedFontSize
 	} else if t.contentThemer != nil {
 		// Use contentThemer if available (dynamic mode with theme override)
 		fontSize = t.contentThemer.Size(theme.SizeNameText)
@@ -940,68 +940,80 @@ func (t *Terminal) initFontLookup() {
 	}
 }
 
-// chooseFixedFontSize selects the largest font size that fits the available widget size for fixed rows/cols.
-func (t *Terminal) chooseFixedFontSize(avail fyne.Size) int {
-	// Ensure shared lookup is populated
+// fixedFontSizeFitMargin is subtracted from the available widget size before
+// picking the largest fitting font. Smaller values let the grid reach closer
+// to the widget edges; larger values leave more breathing room.
+const fixedFontSizeFitMargin = float32(1)
+
+// fixedFontSizeStep is the granularity at which chooseFixedFontSize searches
+// for the best-fitting font size. Set to 1 for legacy integer-only behaviour.
+// At smaller steps the search can find a point size whose rounded cell
+// dimensions (Fyne's TextGrid rounds for seamless backgrounds) happen to fit
+// tighter — this is where the gain over integer-only stepping comes from.
+const fixedFontSizeStep = float32(0.25)
+
+// cellSizeAt returns the rounded cell size for the given font size, populating
+// the shared lookup on demand. The rounding matches Fyne's TextGrid so the
+// cursor and grid border line up with the cells the TextGrid actually paints.
+func cellSizeAt(baseTheme fyne.Theme, fontSize float32) fyne.Size {
+	if size, exists := getSharedCellSize(baseTheme, fontSize); exists {
+		return size
+	}
+	cellSize, _ := fyne.CurrentApp().Driver().RenderedTextSize("M", fontSize, fyne.TextStyle{Monospace: true}, baseTheme.Font(fyne.TextStyle{Monospace: true}))
+	size := fyne.NewSize(float32(math.Round(float64(cellSize.Width))), float32(math.Round(float64(cellSize.Height))))
+	setSharedCellSize(baseTheme, fontSize, size)
+	return size
+}
+
+// chooseFixedFontSize selects the largest font size that fits the available
+// widget size for fixed rows/cols. Returns a (possibly fractional) point size.
+func (t *Terminal) chooseFixedFontSize(avail fyne.Size) float32 {
 	baseTheme := t.customTheme
 	if baseTheme == nil {
 		baseTheme = t.Theme()
 	}
 
-	// Make sure we have all the font sizes cached
-	// Check if at least some entries exist, otherwise populate
-	if _, exists := getSharedCellSize(baseTheme, float32(minAllowedFontSize)); !exists {
-		// Not populated yet, do it now
-		for i := minAllowedFontSize; i <= maxAllowedFontSize; i++ {
-			fontSize := float32(i)
-			if _, exists := getSharedCellSize(baseTheme, fontSize); !exists {
-				cellSize, _ := fyne.CurrentApp().Driver().RenderedTextSize("M", fontSize, fyne.TextStyle{Monospace: true}, baseTheme.Font(fyne.TextStyle{Monospace: true}))
-				size := fyne.NewSize(float32(math.Round(float64(cellSize.Width))), float32(math.Round(float64(cellSize.Height))))
-				setSharedCellSize(baseTheme, fontSize, size)
-			}
-		}
+	cols := float32(t.fixedCols)
+	rows := float32(t.fixedRows)
+	minSize := float32(minAllowedFontSize)
+	maxSize := float32(maxAllowedFontSize)
+	step := fixedFontSizeStep
+	if step <= 0 {
+		step = 1
 	}
 
-	cols := int(t.fixedCols)
-	rows := int(t.fixedRows)
-	best := minAllowedFontSize
+	safeWidth := avail.Width - fixedFontSizeFitMargin
+	safeHeight := avail.Height - fixedFontSizeFitMargin
 
-	// Add a very small buffer to the available size to account for borders and other UI elements
-	safeWidth := avail.Width - 5
-	safeHeight := avail.Height - 5
-
-	for i := minAllowedFontSize; i <= maxAllowedFontSize; i++ {
-		s, _ := getSharedCellSize(baseTheme, float32(i))
-		gw := float32(cols) * s.Width
-		gh := float32(rows) * s.Height
+	best := minSize
+	for size := minSize; size <= maxSize; size += step {
+		s := cellSizeAt(baseTheme, size)
+		gw := cols * s.Width
+		gh := rows * s.Height
 		if gw <= safeWidth && gh <= safeHeight {
-			best = i
+			best = size
 		} else {
 			break
 		}
 	}
 
-	// Ensure we never go below the minimum allowed font size
-	if best < minAllowedFontSize {
-		best = minAllowedFontSize
+	if best < minSize {
+		best = minSize
 	}
 
-	// Double-check that our chosen font size actually fits
-	if best > minAllowedFontSize {
-		s, _ := getSharedCellSize(baseTheme, float32(best))
-		gw := float32(cols) * s.Width
-		gh := float32(rows) * s.Height
-		if gw > safeWidth || gh > safeHeight {
-			// If it doesn't fit, fall back to minimum
-			best = minAllowedFontSize
+	// Sanity-check that the chosen size still fits.
+	if best > minSize {
+		s := cellSizeAt(baseTheme, best)
+		if cols*s.Width > safeWidth || rows*s.Height > safeHeight {
+			best = minSize
 		}
 	}
 
 	if t.debug {
-		s, _ := getSharedCellSize(baseTheme, float32(best))
-		gw := float32(cols) * s.Width
-		gh := float32(rows) * s.Height
-		println(fmt.Sprintf("[chooseFixedFontSize] Font Size %d, Cell Size: %.1fx%.1f -> Grid Size: %.1fx%.1f (Avail: %.1fx%.1f)",
+		s := cellSizeAt(baseTheme, best)
+		gw := cols * s.Width
+		gh := rows * s.Height
+		println(fmt.Sprintf("[chooseFixedFontSize] Font Size %.2f, Cell Size: %.1fx%.1f -> Grid Size: %.1fx%.1f (Avail: %.1fx%.1f)",
 			best, s.Width, s.Height, gw, gh, avail.Width, avail.Height))
 	}
 
