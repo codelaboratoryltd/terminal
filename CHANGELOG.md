@@ -13,6 +13,7 @@ This project adheres to [Semantic Versioning](http://semver.org/).
 ### Added
 - Add option to hide the tab-bar when only one tab is open
 - Add fractional font-scaling to try and allow the terminal to scale closer to borders
+- Add support for disabled/enable cursor blinking
 
 ## [0.1.30]
 ### Fixed

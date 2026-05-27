@@ -193,8 +193,9 @@ type Terminal struct {
 	savedCursorCol int
 
 	// Cursor blinking management
-	cursorBlinkCancel context.CancelFunc
-	cursorBlinkOn     bool // internal toggle to track blink state
+	cursorBlinkCancel   context.CancelFunc
+	cursorBlinkOn       bool // internal toggle to track blink state
+	cursorBlinkDisabled bool // when true, ensureCursorBlinking never starts the ticker (low-graphics mode)
 
 	// Mouse reporting modes
 	mouseSGR bool // DECSET 1006
@@ -1203,6 +1204,12 @@ func (t *Terminal) FocusGained() {
 	// Only refresh if we're not in cleanup mode
 	if !t.cleaningUp {
 		t.Refresh()
+		// Refresh the TermGrid so its blink ticker re-arms if there are any
+		// BlinkEnabled cells (we paused it in FocusLost). The mayContainBlink
+		// short-circuit means this is cheap when no cells blink.
+		if t.content != nil {
+			t.content.Refresh()
+		}
 	}
 }
 
@@ -1212,6 +1219,12 @@ func (t *Terminal) FocusLost() {
 	if t.cursor != nil {
 		t.cursor.Hidden = true
 	}
+	// Pause the TermGrid blink ticker — when the window is unfocused, blinking
+	// cells aren't visible to the user anyway, but on software OpenGL each
+	// 500ms tick forces a full canvas redraw. FocusGained re-arms it.
+	if t.content != nil {
+		t.content.StopBlink()
+	}
 	// Only refresh if we're not in cleanup mode
 	if !t.cleaningUp {
 		t.Refresh()
@@ -1220,8 +1233,9 @@ func (t *Terminal) FocusLost() {
 
 // ensureCursorBlinking toggles the blinking loop based on visibility/focus and shape.
 func (t *Terminal) ensureCursorBlinking() {
-	// Blink when focused and cursor is not permanently hidden.
-	shouldBlink := t.focused && !t.cursorHidden
+	// Blink when focused and cursor is not permanently hidden, unless blinking
+	// has been disabled (e.g. low-graphics mode).
+	shouldBlink := t.focused && !t.cursorHidden && !t.cursorBlinkDisabled
 
 	if !shouldBlink {
 		t.stopCursorBlink()
@@ -1231,6 +1245,21 @@ func (t *Terminal) ensureCursorBlinking() {
 	// Start if not running
 	if t.cursorBlinkCancel == nil {
 		t.startCursorBlink()
+	}
+}
+
+// SetCursorBlinkEnabled controls whether the cursor blinks. When disabled the
+// cursor is shown solid while focused. Intended for low-graphics / VDI mode
+// where the 500ms blink ticker costs a full canvas redraw on software OpenGL.
+func (t *Terminal) SetCursorBlinkEnabled(enabled bool) {
+	t.cursorBlinkDisabled = !enabled
+	t.ensureCursorBlinking()
+	if t.cursor != nil {
+		// When disabled, force the cursor visible (subject to focus/cursorHidden).
+		t.cursor.Hidden = !t.focused || t.cursorHidden
+		fyne.Do(func() {
+			t.cursor.Refresh()
+		})
 	}
 }
 
