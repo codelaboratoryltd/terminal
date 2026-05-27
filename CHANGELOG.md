@@ -5,6 +5,15 @@ This project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased] - 2025-09-16
 
+## [0.1.31]
+### Fixed
+- Fix text selection over multiple lines highlighting the wrong cells
+- Fix blinking getting leaked into other cells not intended to blink
+- Fix double-click selection blocking on "-" and "_"
+### Added
+- Add option to hide the tab-bar when only one tab is open
+- Add fractional font-scaling to try and allow the terminal to scale closer to borders
+
 ## [0.1.30]
 ### Fixed
 - Fix on-screen keyboard arrow keys not working
