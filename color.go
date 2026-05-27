@@ -297,8 +297,14 @@ func (t *Terminal) handleColorMode(modeStr string) {
 	case 5: // Blinking text
 		t.blinking = true
 		t.invalidateBlinkGridCache()
+	case 22: // Normal intensity - turn off bold
+		t.bold = false
+	case 23: // Not italic (italic is not currently rendered, but accept the code so it does not fall through)
 	case 24: // Not underlined - remove underline
 		t.underlined = false
+	case 25: // Steady (not blinking) - turn off blink
+		t.blinking = false
+		t.invalidateBlinkGridCache()
 	case 7: // Reverse video - swap foreground and background colors
 		bg, fg := t.currentBG, t.currentFG
 		if fg == nil {
