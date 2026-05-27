@@ -156,6 +156,12 @@ type Terminal struct {
 	selecting        bool
 	mouseCursor      desktop.Cursor
 
+	// appliedHighlight tracks the range whose cells currently carry
+	// Highlighted=true on the grid. May lag behind selStart/selEnd if the
+	// buffer scrolled or row widths grew since highlight was applied — must
+	// be used (not selStart/selEnd) when clearing to avoid ghost highlights.
+	appliedHighlight *appliedHighlightRange
+
 	keyboardState struct {
 		shiftPressed bool
 		ctrlPressed  bool
@@ -351,17 +357,21 @@ func (t *Terminal) DoubleTapped(pe *fyne.PointEvent) {
 
 	start, end := col-1, col-1
 
-	if !unicode.IsLetter(rowContent[start].Rune) && !unicode.IsDigit(rowContent[start].Rune) {
+	isWordChar := func(r rune) bool {
+		return unicode.IsLetter(r) || unicode.IsDigit(r) || r == '-' || r == '_'
+	}
+
+	if !isWordChar(rowContent[start].Rune) {
 		return
 	}
 
-	for start > 0 && (unicode.IsLetter(rowContent[start-1].Rune) || unicode.IsDigit(rowContent[start-1].Rune)) {
+	for start > 0 && isWordChar(rowContent[start-1].Rune) {
 		start--
 	}
-	if start < len(rowContent) && !unicode.IsLetter(rowContent[start].Rune) && !unicode.IsDigit(rowContent[start].Rune) {
+	if start < len(rowContent) && !isWordChar(rowContent[start].Rune) {
 		start++
 	}
-	for end < len(rowContent) && (unicode.IsLetter(rowContent[end].Rune) || unicode.IsDigit(rowContent[end].Rune)) {
+	for end < len(rowContent) && isWordChar(rowContent[end].Rune) {
 		end++
 	}
 	if start == end {
@@ -1115,16 +1125,12 @@ func (t *Terminal) Dragged(d *fyne.DragEvent) {
 		t.selStart = &p
 		t.selEnd = nil
 	}
-
-	// clear any previous selection
-	sr, sc, er, ec := t.getSelectedRange()
-	widget2.ClearHighlightRange(t.content, t.blockMode, sr, sc, er, ec)
-
-	// make sure that x,y,x1,y1 are always positive
 	t.selecting = true
 	t.mouseCursor = desktop.TextCursor
 	p := t.getTermPosition(*pos)
 	t.selEnd = &p
+	// highlightSelectedText clears the previously-applied range first, so we
+	// don't need a separate ClearHighlightRange call here.
 	t.highlightSelectedText()
 }
 

@@ -125,6 +125,11 @@ func TestDoubleTapped(t *testing.T) {
 			{Rune: 'n'}, {Rune: 'g'}, {Rune: ' '}, {Rune: '1'}, {Rune: '2'},
 			{Rune: '3'}, {Rune: '.'},
 		}},
+		{Cells: []widget.TextGridCell{
+			{Rune: 'f'}, {Rune: 'o'}, {Rune: 'o'}, {Rune: '-'}, {Rune: 'b'},
+			{Rune: 'a'}, {Rune: 'r'}, {Rune: ' '}, {Rune: 'b'}, {Rune: 'a'},
+			{Rune: 'z'}, {Rune: '_'}, {Rune: 'q'}, {Rune: 'u'}, {Rune: 'x'},
+		}},
 	}
 
 	term := &Terminal{
@@ -159,6 +164,14 @@ func TestDoubleTapped(t *testing.T) {
 		"Double tap on space between words": {
 			clickPosition: term.getTextPosition(position{Row: 1, Col: 6}),
 			expectedWord:  "",
+		},
+		"Double tap on hyphenated word": {
+			clickPosition: term.getTextPosition(position{Row: 3, Col: 1}),
+			expectedWord:  "foo-bar",
+		},
+		"Double tap on underscore word": {
+			clickPosition: term.getTextPosition(position{Row: 3, Col: 9}),
+			expectedWord:  "baz_qux",
 		},
 	}
 
