@@ -8,6 +8,14 @@ import (
 	widget2 "github.com/fyne-io/terminal/internal/widget"
 )
 
+// appliedHighlightRange records the range previously passed to HighlightRange
+// so the next clear can target exactly those cells, regardless of subsequent
+// changes to selStart/selEnd or the row Cells slices.
+type appliedHighlightRange struct {
+	blockMode                          bool
+	startRow, startCol, endRow, endCol int
+}
+
 // getSelectedRange returns the current selection range, start row, start col, end row, end col
 // It always returns a positive selection
 func (t *Terminal) getSelectedRange() (int, int, int, int) {
@@ -44,14 +52,25 @@ func (t *Terminal) getSelectedRange() (int, int, int, int) {
 }
 
 func (t *Terminal) highlightSelectedText() {
+	if t.appliedHighlight != nil {
+		a := t.appliedHighlight
+		widget2.ClearHighlightRange(t.content, a.blockMode, a.startRow, a.startCol, a.endRow, a.endCol)
+	}
 	sr, sc, er, ec := t.getSelectedRange()
 	widget2.HighlightRange(t.content, t.blockMode, sr, sc, er, ec, highlightBitMask)
+	t.appliedHighlight = &appliedHighlightRange{
+		blockMode: t.blockMode,
+		startRow:  sr, startCol: sc, endRow: er, endCol: ec,
+	}
 	t.Refresh()
 }
 
 func (t *Terminal) clearSelectedText() {
-	sr, sc, er, ec := t.getSelectedRange()
-	widget2.ClearHighlightRange(t.content, t.blockMode, sr, sc, er, ec)
+	if t.appliedHighlight != nil {
+		a := t.appliedHighlight
+		widget2.ClearHighlightRange(t.content, a.blockMode, a.startRow, a.startCol, a.endRow, a.endCol)
+		t.appliedHighlight = nil
+	}
 	t.Refresh()
 	t.blockMode = false
 	t.selecting = false
