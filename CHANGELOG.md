@@ -5,6 +5,10 @@ This project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased] - 2025-09-16
 
+## [0.1.32]
+### Added
+- Add support for slow text-blink
+
 ## [0.1.31]
 ### Fixed
 - Fix text selection over multiple lines highlighting the wrong cells

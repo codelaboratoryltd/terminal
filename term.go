@@ -1263,6 +1263,24 @@ func (t *Terminal) SetCursorBlinkEnabled(enabled bool) {
 	}
 }
 
+// SetSlowTextBlink switches ANSI text blink between the normal 500ms cadence
+// (off) and a 3s-on/500ms-off heartbeat with a persistent underline marker
+// (on). Intended for low-graphics / VDI mode where each blink frame triggers a
+// full-window software OpenGL repaint. The switch is process-wide: any single
+// Terminal calling this affects all of them, which is what the app's single
+// low-graphics setting wants.
+func (t *Terminal) SetSlowTextBlink(on bool) {
+	widget2.SetSlowBlinkMode(on)
+	if t.content != nil {
+		// Force a rescan so Style()'s underline injection re-applies and the
+		// running ticker (if any) gets re-armed at the new cadence on its
+		// next refreshBlink call.
+		t.content.InvalidateBlinkCache()
+		t.content.StopBlink()
+		t.content.Refresh()
+	}
+}
+
 func (t *Terminal) startCursorBlink() {
 	if t.cursorBlinkCancel != nil {
 		return

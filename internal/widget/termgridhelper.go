@@ -2,11 +2,31 @@ package widget
 
 import (
 	"image/color"
+	"sync/atomic"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
+
+// slowBlinkMode, when true, switches ANSI text blink to a heartbeat cadence
+// (3s visible / 500ms invisible) and forces BlinkEnabled cells to render with
+// an underline as a persistent attention marker. Toggled by SetSlowBlinkMode,
+// driven by the app's low-graphics setting. Process-wide because the app only
+// ever runs one render mode at a time.
+var slowBlinkMode atomic.Bool
+
+// SetSlowBlinkMode enables or disables slow-pulse rendering for blinking text.
+// See the slowBlinkMode docs.
+func SetSlowBlinkMode(on bool) {
+	slowBlinkMode.Store(on)
+}
+
+// IsSlowBlinkMode reports the current slowBlinkMode state. Exposed so the
+// TermGrid blink loop can choose its cadence.
+func IsSlowBlinkMode() bool {
+	return slowBlinkMode.Load()
+}
 
 // HighlightRange highlight options to the given range
 // if highlighting has previously been applied it is enabled
@@ -181,6 +201,14 @@ type TermTextGridStyle struct {
 func (h *TermTextGridStyle) Style() fyne.TextStyle {
 	if h == nil {
 		return fyne.TextStyle{}
+	}
+	if h.BlinkEnabled && slowBlinkMode.Load() {
+		// In slow-blink (low-graphics) mode, give BlinkEnabled cells a
+		// persistent underline so they keep drawing attention between
+		// the infrequent heartbeat pulses. Preserve existing Bold/etc.
+		s := h.TextStyle
+		s.Underline = true
+		return s
 	}
 	return h.TextStyle
 }

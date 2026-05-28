@@ -111,6 +111,13 @@ func (t *TermGrid) StopBlink() {
 	}
 }
 
+// slowBlinkVisible is how long cells stay visible between heartbeat pulses in
+// slow-blink mode.
+const slowBlinkVisible = 3 * time.Second
+
+// slowBlinkInvisible is the duration of the "off" pulse in slow-blink mode.
+const slowBlinkInvisible = 500 * time.Millisecond
+
 func (t *TermGrid) runBlink() {
 	if t.tickerCancel != nil {
 		t.tickerCancel()
@@ -118,6 +125,12 @@ func (t *TermGrid) runBlink() {
 	}
 	var tickerContext context.Context
 	tickerContext, t.tickerCancel = context.WithCancel(context.Background())
+
+	if IsSlowBlinkMode() {
+		go t.runBlinkSlow(tickerContext)
+		return
+	}
+
 	ticker := time.NewTicker(blinkingInterval)
 	blinking := false
 	go func() {
@@ -141,4 +154,38 @@ func (t *TermGrid) runBlink() {
 			}
 		}
 	}()
+}
+
+// runBlinkSlow drives blinking text in low-graphics mode: cells are visible
+// for slowBlinkVisible, then invisible for slowBlinkInvisible, and repeat.
+// Combined with the underline marker injected by TermTextGridStyle.Style()
+// this preserves the "draw attention" semantic while reducing full-window
+// repaints from ~2 Hz to ~0.57 Hz.
+func (t *TermGrid) runBlinkSlow(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Printf("Panic in TermGrid slow blink goroutine: %v\n", r)
+		}
+	}()
+
+	visible := true
+	timer := time.NewTimer(slowBlinkVisible)
+	defer timer.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+			visible = !visible
+			blinking := !visible // refreshBlink treats true == "in the off phase"
+			fyne.Do(func() {
+				t.refreshBlink(blinking)
+			})
+			if visible {
+				timer.Reset(slowBlinkVisible)
+			} else {
+				timer.Reset(slowBlinkInvisible)
+			}
+		}
+	}
 }
