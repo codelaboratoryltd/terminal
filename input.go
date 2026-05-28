@@ -186,11 +186,17 @@ func (t *Terminal) trackKeyboardState(down bool, e *fyne.KeyEvent) {
 // KeyDown is called when we get a down key event
 func (t *Terminal) KeyDown(e *fyne.KeyEvent) {
 	t.trackKeyboardState(true, e)
+	if cb := t.keyDownCallback; cb != nil {
+		cb(e)
+	}
 }
 
 // KeyUp is called when we get an up key event
 func (t *Terminal) KeyUp(e *fyne.KeyEvent) {
 	t.trackKeyboardState(false, e)
+	if cb := t.keyUpCallback; cb != nil {
+		cb(e)
+	}
 }
 
 // TypedShortcut handles key combinations, we pass them on to the tty.

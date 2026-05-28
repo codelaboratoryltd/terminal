@@ -128,6 +128,8 @@ type Terminal struct {
 	savedRow, savedCol         int
 	scrollTop, scrollBottom    int
 	cursorChangeCallback       func(x, y int)
+	keyDownCallback            func(*fyne.KeyEvent)
+	keyUpCallback              func(*fyne.KeyEvent)
 
 	lastDoubleTapTime time.Time
 
@@ -252,6 +254,37 @@ func (t *Terminal) GridCursorChangeCallback(f func(x, y int)) {
 	if f != nil {
 		t.cursorChangeCallback = f
 	}
+}
+
+// CursorPixelPosition returns the top-left pixel position of the cursor cell
+// in the terminal widget's local coordinate space. This mirrors the formula
+// used in render.moveCursor so it lines up exactly with the on-screen cursor
+// box (including fixed-PTY-mode centring offsets).
+func (t *Terminal) CursorPixelPosition() fyne.Position {
+	cell := t.guessCellSize()
+	return fyne.NewPos(
+		t.offsetX+cell.Width*float32(t.cursorCol),
+		t.offsetY+cell.Height*float32(t.cursorRow),
+	)
+}
+
+// CellPixelSize returns the rendered size of a single grid cell in pixels.
+func (t *Terminal) CellPixelSize() fyne.Size {
+	return t.guessCellSize()
+}
+
+// SetKeyDownCallback registers a function invoked after every KeyDown event
+// reaches the terminal. Useful for observing modifier-only key presses (e.g.
+// detecting a Control-key tap) that don't surface via Canvas.SetOnTypedKey
+// when the terminal holds focus. Pass nil to clear.
+func (t *Terminal) SetKeyDownCallback(f func(*fyne.KeyEvent)) {
+	t.keyDownCallback = f
+}
+
+// SetKeyUpCallback registers a function invoked after every KeyUp event
+// reaches the terminal. See SetKeyDownCallback. Pass nil to clear.
+func (t *Terminal) SetKeyUpCallback(f func(*fyne.KeyEvent)) {
+	t.keyUpCallback = f
 }
 
 // AcceptsTab indicates that this widget will use the Tab key (avoids loss of focus).
