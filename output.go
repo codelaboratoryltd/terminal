@@ -429,9 +429,7 @@ func (t *Terminal) handleOutputChar(r rune) {
 		return
 	}
 
-	// Ensure underscores are extra-visible: also apply underline style to underscore glyphs
-	underArg := t.underlined || r == '_'
-	cellStyle := widget2.NewTermTextGridStyle(t.currentFG, t.currentBG, highlightBitMask, t.blinking, t.bold, underArg)
+	cellStyle := widget2.NewTermTextGridStyle(t.currentFG, t.currentBG, highlightBitMask, t.blinking, t.bold, t.underlined)
 
 	// Force the row to have columns that fill the PTY size, this is to avoid the terminal
 	// having blank areas where it should be background colour filled. No cell = no background.
@@ -445,7 +443,7 @@ func (t *Terminal) handleOutputChar(r rune) {
 	}
 
 	if t.blinking {
-		cellStyle = widget2.NewTermTextGridStyle(t.currentFG, t.currentBG, highlightBitMask, t.blinking, t.bold, underArg)
+		cellStyle = widget2.NewTermTextGridStyle(t.currentFG, t.currentBG, highlightBitMask, t.blinking, t.bold, t.underlined)
 	}
 
 	// Place the character at the current position (manually to avoid TextGrid internal assumptions)
