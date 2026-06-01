@@ -509,7 +509,7 @@ func (t *Terminal) scrollUp() {
 	}
 	// Clear the top line of the region
 	t.content.Rows[t.scrollTop] = widget.TextGridRow{}
-	t.content.Refresh()
+	// No Refresh here — run() calls scheduleRefresh() after handleOutput returns.
 }
 
 func (t *Terminal) scrollDown() {
@@ -524,7 +524,7 @@ func (t *Terminal) scrollDown() {
 	}
 	// Clear the bottom line of the region
 	t.content.Rows[t.scrollBottom] = widget.TextGridRow{}
-	t.content.Refresh()
+	// No Refresh here — run() calls scheduleRefresh() after handleOutput returns.
 }
 
 func handleOutputBackspace(t *Terminal) {

@@ -13,6 +13,7 @@ import (
 	"reflect"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode"
 
@@ -204,6 +205,10 @@ type Terminal struct {
 
 	// Optional tracing of incoming PTY bytes for debugging
 	trace io.Writer
+
+	// refreshScheduled gates the 16ms coalesce timer so we fire at most one
+	// fyne.Do(Refresh) per ~60fps window regardless of PTY output rate.
+	refreshScheduled atomic.Bool
 
 	// Fixed PTY sizing / scaling state
 	fixedPTY       bool
@@ -481,6 +486,7 @@ func (t *Terminal) Resize(s fyne.Size) {
 
 	t.BaseWidget.Resize(s)
 	if t.content != nil {
+		t.content.SetGridDimensions(int(cols), int(rows))
 		t.content.Resize(fyne.NewSize(float32(cols)*cellSize.Width, float32(rows)*cellSize.Height))
 	}
 
@@ -705,6 +711,20 @@ func (t *Terminal) invalidateBlinkGridCache() {
 	}
 }
 
+const refreshCoalesceInterval = 16 * time.Millisecond // cap repaints at ~60fps
+
+// scheduleRefresh coalesces rapid PTY output into a single Fyne repaint per
+// ~16ms window. Without this, every individual PTY read (often 1–4 bytes for
+// an echoed character) triggers a full-window software-OpenGL repaint.
+func (t *Terminal) scheduleRefresh() {
+	if t.refreshScheduled.CompareAndSwap(false, true) {
+		time.AfterFunc(refreshCoalesceInterval, func() {
+			t.refreshScheduled.Store(false)
+			fyne.Do(t.Refresh)
+		})
+	}
+}
+
 func (t *Terminal) run() {
 	buf := make([]byte, bufLen)
 	var leftOver []byte
@@ -749,7 +769,7 @@ func (t *Terminal) run() {
 
 		leftOver = t.handleOutput(fullBuf[:num])
 		if len(leftOver) == 0 {
-			fyne.Do(t.Refresh)
+			t.scheduleRefresh()
 		}
 	}
 }
@@ -897,6 +917,9 @@ func (t *Terminal) EnableFixedPTYSize(rows, cols uint) {
 	t.fixedRows, t.fixedCols = rows, cols
 	// Update config immediately; renderer will size/center and pick font to fit
 	t.config.Rows, t.config.Columns = rows, cols
+	if t.content != nil {
+		t.content.SetGridDimensions(int(cols), int(rows))
+	}
 	if t.scrollBottom == 0 || t.scrollBottom >= int(rows) {
 		t.scrollBottom = int(rows) - 1
 	}
