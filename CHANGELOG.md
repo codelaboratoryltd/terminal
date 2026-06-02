@@ -5,6 +5,10 @@ This project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased] - 2025-09-16
 
+## [0.1.33]
+### Added
+- Expose blinking cursor position on term grid
+
 ## [0.1.32]
 ### Added
 - Add support for slow text-blink
