@@ -5,6 +5,13 @@ This project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased] - 2025-09-16
 
+## v0.1.33
+### Changed
+- Implemented more effecient terminal grid renderer, significantly reduces CPU/GPU load and memory usage
+- Restrict term grid refreshes to prevent load spides on PTY updates
+### Added
+- Add workaround for DejaVu font underscores getting cropped by Fyne's text rendering
+
 ## [0.1.32]
 ### Added
 - Add support for slow text-blink
