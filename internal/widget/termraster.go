@@ -22,7 +22,6 @@ import (
 	"image"
 	"image/color"
 	"image/draw"
-	"strings"
 	"sync"
 
 	"fyne.io/fyne/v2"
@@ -53,28 +52,6 @@ var (
 	rasterFontMu    sync.RWMutex
 	rasterFontCache = map[fontCacheKey]*rasterFontData{}
 )
-
-// underscoreShiftPx is how many device pixels to raise the '_' glyph when
-// rendering DejaVuSansMono. That font places the underscore at or below the
-// descender line; at certain point sizes the rounding causes Fyne to clip it
-// entirely. The shift keeps it visible without modifying the font files.
-const underscoreShiftPx = 2
-
-// underscoreShiftFace wraps an xfont.Face and shifts the '_' glyph up by
-// underscoreShiftPx device pixels by adjusting the destination rectangle
-// returned from Glyph(). All other runes are passed through unchanged.
-type underscoreShiftFace struct {
-	xfont.Face
-}
-
-func (f underscoreShiftFace) Glyph(dot fixed.Point26_6, r rune) (dr image.Rectangle, mask image.Image, maskp image.Point, advance fixed.Int26_6, ok bool) {
-	dr, mask, maskp, advance, ok = f.Face.Glyph(dot, r)
-	if ok && r == '_' {
-		dr.Min.Y -= underscoreShiftPx
-		dr.Max.Y -= underscoreShiftPx
-	}
-	return
-}
 
 func getRasterFont(textSizePt float32, monoRes, boldRes fyne.Resource, scale float32) *rasterFontData {
 	key := fontCacheKey{textSizePt, monoRes.Name(), scale}
@@ -127,14 +104,6 @@ func loadRasterFont(textSizePt float32, monoRes, boldRes fyne.Resource, scale fl
 		if face, err := opentype.NewFace(f, opts); err == nil {
 			d.bold = face
 		}
-	}
-
-	// DejaVuSansMono places '_' at or below the descender line, which causes
-	// Fyne to clip it at certain point sizes. Wrap both faces so the glyph
-	// renders a couple of pixels higher than the font data specifies.
-	if strings.Contains(monoRes.Name(), "DejaVu") {
-		d.mono = underscoreShiftFace{d.mono}
-		d.bold = underscoreShiftFace{d.bold}
 	}
 
 	return d
