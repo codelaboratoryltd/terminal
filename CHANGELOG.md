@@ -5,7 +5,11 @@ This project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased] - 2025-09-16
 
-## v0.1.33
+## [0.1.34]
+### Added
+- Expose blinking cursor position on term grid
+
+## [0.1.33]
 ### Changed
 - Implemented more effecient terminal grid renderer, significantly reduces CPU/GPU load and memory usage
 - Restrict term grid refreshes to prevent load spides on PTY updates

@@ -278,6 +278,16 @@ func (t *Terminal) CellPixelSize() fyne.Size {
 	return t.guessCellSize()
 }
 
+// CursorRenderedPosition returns the exact pixel position and size of the
+// cursor rectangle as currently placed by the renderer. Returns false if the
+// cursor object has not been created yet.
+func (t *Terminal) CursorRenderedPosition() (pos fyne.Position, size fyne.Size, ok bool) {
+	if t.cursor == nil {
+		return
+	}
+	return t.cursor.Position(), t.cursor.Size(), true
+}
+
 // SetKeyDownCallback registers a function invoked after every KeyDown event
 // reaches the terminal. Useful for observing modifier-only key presses (e.g.
 // detecting a Control-key tap) that don't surface via Canvas.SetOnTypedKey
