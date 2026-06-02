@@ -245,7 +245,13 @@ func RenderTermToImage(
 
 			// Clip to cell bounds so any glyph side-bearing never bleeds into
 			// the adjacent column. font.Drawer respects the destination bounds.
-			cellDst := img.SubImage(image.Rect(x0, y0, x0+cw, y0+ch)).(draw.Image)
+			// Allow 1 extra pixel at the bottom so fonts that place descenders
+			// (e.g. '_') at the very edge of cellH aren't clipped — mirrors
+			// fyne's TextVectorPad = 1 for canvas.Text. The overflow pixel falls
+			// in the next row's top-most line; if that cell has default background
+			// and its glyph has no ink there, the overflow dot remains visible.
+			// This is the same trade-off fyne's own fix accepts.
+			cellDst := img.SubImage(image.Rect(x0, y0, x0+cw, min(y0+ch+1, h))).(draw.Image)
 			d := xfont.Drawer{
 				Dst:  cellDst,
 				Src:  fgUniform,

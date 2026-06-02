@@ -5,6 +5,10 @@ This project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased] - 2025-09-16
 
+## [0.1.35]
+### Fixed
+- Allow for fonts with bottom-of-cell descender underscore which otherwise get clipped
+
 ## [0.1.34]
 ### Added
 - Expose blinking cursor position on term grid
