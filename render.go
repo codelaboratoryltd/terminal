@@ -129,14 +129,26 @@ func (r *render) Layout(s fyne.Size) {
 	gridWidth := float32(r.term.config.Columns) * cell.Width
 	gridHeight := float32(r.term.config.Rows) * cell.Height
 
-	// Center within available size if there is extra room
 	r.term.offsetX = 0
 	r.term.offsetY = 0
-	if s.Width > gridWidth {
-		r.term.offsetX = (s.Width - gridWidth) / 2
-	}
-	if s.Height > gridHeight {
-		r.term.offsetY = (s.Height - gridHeight) / 2
+
+	// In stretch-to-fit mode the content fills the entire widget; the raster
+	// renders at the font-natural resolution and GL scales the texture to fill.
+	var displayW, displayH float32
+	if r.term.stretchToFit && r.term.fixedPTY {
+		displayW = s.Width
+		displayH = s.Height
+		r.term.content.SetStretchFontSize(r.term.fixedFontSize)
+	} else {
+		displayW = gridWidth
+		displayH = gridHeight
+		r.term.content.SetStretchFontSize(0)
+		if s.Width > gridWidth {
+			r.term.offsetX = (s.Width - gridWidth) / 2
+		}
+		if s.Height > gridHeight {
+			r.term.offsetY = (s.Height - gridHeight) / 2
+		}
 	}
 
 	// Move/resize the visible content object (wrapper if present)
@@ -145,9 +157,9 @@ func (r *render) Layout(s fyne.Size) {
 		target = r.term.contentWrapper
 	}
 	target.Move(fyne.NewPos(r.term.offsetX, r.term.offsetY))
-	target.Resize(fyne.NewSize(gridWidth, gridHeight))
-	// Ensure inner content always matches grid size
-	r.term.content.Resize(fyne.NewSize(gridWidth, gridHeight))
+	target.Resize(fyne.NewSize(displayW, displayH))
+	// Ensure inner content always matches display size
+	r.term.content.Resize(fyne.NewSize(displayW, displayH))
 
 	// Update border rectangle around the grid area
 	if r.border == nil {
@@ -163,7 +175,7 @@ func (r *render) Layout(s fyne.Size) {
 		// Expand border to account for stroke width (stroke draws on the inside)
 		borderOffset := r.term.borderWidth / 2
 		r.border.Move(fyne.NewPos(r.term.offsetX-borderOffset, r.term.offsetY-borderOffset))
-		r.border.Resize(fyne.NewSize(gridWidth+r.term.borderWidth, gridHeight+r.term.borderWidth))
+		r.border.Resize(fyne.NewSize(displayW+r.term.borderWidth, displayH+r.term.borderWidth))
 	} else {
 		r.border.Hidden = true
 	}
@@ -173,9 +185,9 @@ func (r *render) Layout(s fyne.Size) {
 		r.ptyBackground = canvas.NewRectangle(r.getPTYBackgroundColor())
 	}
 
-	// Position PTY background to exactly match the grid content area
+	// Position PTY background to exactly match the display area
 	r.ptyBackground.Move(fyne.NewPos(r.term.offsetX, r.term.offsetY))
-	r.ptyBackground.Resize(fyne.NewSize(gridWidth, gridHeight))
+	r.ptyBackground.Resize(fyne.NewSize(displayW, displayH))
 	r.ptyBackground.FillColor = r.getPTYBackgroundColor()
 	r.ptyBackground.Hidden = false
 }
@@ -328,11 +340,25 @@ func (r *render) Destroy() {
 	}
 }
 
+// effectiveCellSize returns the on-screen cell dimensions. In stretch-to-fit
+// mode these differ from the font-metric cell size because the raster texture
+// is scaled to fill the whole widget.
+func (r *render) effectiveCellSize() fyne.Size {
+	if r.term.stretchToFit && r.term.fixedPTY &&
+		r.term.config.Columns > 0 && r.term.config.Rows > 0 {
+		return fyne.NewSize(
+			r.term.lastLayoutSize.Width/float32(r.term.config.Columns),
+			r.term.lastLayoutSize.Height/float32(r.term.config.Rows),
+		)
+	}
+	return r.term.guessCellSize()
+}
+
 func (r *render) moveCursor() {
 	if r.term.cursor == nil {
 		return
 	}
-	cell := r.term.guessCellSize()
+	cell := r.effectiveCellSize()
 	r.term.cursor.Move(fyne.NewPos(r.term.offsetX+cell.Width*float32(r.term.cursorCol), r.term.offsetY+cell.Height*float32(r.term.cursorRow)))
 }
 
@@ -370,6 +396,14 @@ func (t *Terminal) refreshCursor() {
 	if currentSize.Width <= 0 || currentSize.Height <= 0 {
 		// Cursor size not initialized, calculate it
 		cellSize := t.guessCellSize()
+		// In stretch-to-fit mode the font-metric cell is smaller than the displayed cell;
+		// use the actual on-screen cell dimensions so the cursor fills its character slot.
+		if t.stretchToFit && t.fixedPTY && t.config.Columns > 0 && t.config.Rows > 0 {
+			cellSize = fyne.NewSize(
+				t.lastLayoutSize.Width/float32(t.config.Columns),
+				t.lastLayoutSize.Height/float32(t.config.Rows),
+			)
+		}
 		var width float32
 		if t.cursorShape == "caret" {
 			width = float32(cursorWidthCaret)
@@ -437,6 +471,7 @@ func (t *Terminal) refreshCursor() {
 func (t *Terminal) CreateRenderer() fyne.WidgetRenderer {
 	r := &render{term: t}
 	t.cursorMoved = r.moveCursor
+	t.relayout = func() { r.Layout(t.Size()) }
 
 	// Initialize all canvas objects immediately to prevent race conditions
 	r.bg = canvas.NewRectangle(r.getBackgroundColor())

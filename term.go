@@ -148,6 +148,7 @@ type Terminal struct {
 	applicationCursorKeys    bool   // DECCKM: application cursor key mode
 	cursorShape              string // "block" or "caret"
 	cursorMoved              func()
+	relayout                 func() // set by CreateRenderer; forces Layout at the current widget size
 
 	onMouseDown, onMouseUp func(int, fyne.KeyModifier, fyne.Position)
 	g0Charset              charSet
@@ -215,6 +216,7 @@ type Terminal struct {
 	fixedRows      uint
 	fixedCols      uint
 	fixedFontSize  float32
+	stretchToFit   bool // fill the whole widget, ignoring aspect ratio
 	contentThemer  *ptyTheme
 	contentWrapper fyne.CanvasObject
 
@@ -960,6 +962,23 @@ func (t *Terminal) DisableFixedPTYSize() {
 	t.lastLayoutSize = fyne.NewSize(0, 0)
 	// Trigger re-layout which will recompute rows/cols and PTY size on next resize
 	fyne.Do(t.Refresh)
+}
+
+// SetStretchToFit enables or disables stretch-to-fit mode. When enabled (and
+// the terminal is in fixed-PTY mode) the content is expanded to fill the entire
+// widget area and the raster is rendered at the font-natural resolution, letting
+// GL stretch the texture to fill. This fills the window without reflowing the
+// PTY, at the cost of non-square pixels when the window aspect ratio does not
+// match the grid's natural aspect ratio.
+func (t *Terminal) SetStretchToFit(enabled bool) {
+	t.stretchToFit = enabled
+	t.lastLayoutSize = fyne.NewSize(0, 0)
+	fyne.Do(func() {
+		if t.relayout != nil {
+			t.relayout()
+		}
+		t.Refresh()
+	})
 }
 
 // initFontLookup ensures the shared font lookup table is populated for this terminal's theme.

@@ -34,10 +34,11 @@ type TermGrid struct {
 	mayContainBlink atomic.Bool
 
 	// Raster renderer state.
-	raster  *canvas.Raster
-	pixBuf  *image.RGBA
-	termCols int // set by Terminal when the grid is sized
-	termRows int
+	raster          *canvas.Raster
+	pixBuf          *image.RGBA
+	termCols        int // set by Terminal when the grid is sized
+	termRows        int
+	stretchFontSize float32 // non-zero: render at this font size and let GL stretch to fill
 }
 
 // CreateRenderer is a private method to Fyne which links this widget to its renderer.
@@ -83,8 +84,35 @@ func (t *TermGrid) drawToImage(w, h int) image.Image {
 		}
 	}
 
+	// Stretch mode: render at the natural font resolution and return a
+	// (possibly smaller) image; Fyne/GL stretches the texture to fill (w, h).
+	if t.stretchFontSize > 0 {
+		cw, ch := RasterCellSize(t.stretchFontSize, monoFont, boldFont)
+		renderW := int(math.Round(float64(float32(cols) * cw * scale)))
+		renderH := int(math.Round(float64(float32(rows) * ch * scale)))
+		if renderW < 1 {
+			renderW = 1
+		}
+		if renderH < 1 {
+			renderH = 1
+		}
+		if t.pixBuf.Bounds().Dx() != renderW || t.pixBuf.Bounds().Dy() != renderH {
+			t.pixBuf = image.NewRGBA(image.Rect(0, 0, renderW, renderH))
+		}
+		RenderTermToImage(t.Rows, t.pixBuf, cols, rows, defaultFG, defaultBG, t.stretchFontSize, monoFont, boldFont, scale)
+		return t.pixBuf
+	}
+
 	RenderTermToImage(t.Rows, t.pixBuf, cols, rows, defaultFG, defaultBG, textSizePt, monoFont, boldFont, scale)
 	return t.pixBuf
+}
+
+// SetStretchFontSize enables stretch-to-fit rendering. When pt > 0 the grid
+// rasterises at the pixel dimensions implied by that font size and returns the
+// result to Fyne, which then scales it to the widget's actual on-screen area
+// via the GL texture quad. Set to 0 to restore normal (1:1) rendering.
+func (t *TermGrid) SetStretchFontSize(pt float32) {
+	t.stretchFontSize = pt
 }
 
 // SetGridDimensions tells the raster renderer how many columns and rows the
