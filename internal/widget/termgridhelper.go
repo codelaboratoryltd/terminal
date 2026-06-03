@@ -32,7 +32,6 @@ func IsSlowBlinkMode() bool {
 // if highlighting has previously been applied it is enabled
 func HighlightRange(t *TermGrid, blockMode bool, startRow, startCol, endRow, endCol int, bitmask byte) {
 	applyHighlight := func(cell *widget.TextGridCell) {
-		// Check if already highlighted
 		if h, ok := cell.Style.(*TermTextGridStyle); !ok {
 			if cell.Style != nil {
 				cell.Style = NewTermTextGridStyle(cell.Style.TextColor(), cell.Style.BackgroundColor(), bitmask, false, cell.Style.Style().Bold, cell.Style.Style().Underline)
@@ -40,9 +39,13 @@ func HighlightRange(t *TermGrid, blockMode bool, startRow, startCol, endRow, end
 				cell.Style = NewTermTextGridStyle(nil, nil, bitmask, false, false, false)
 			}
 			cell.Style.(*TermTextGridStyle).Highlighted = true
-
-		} else {
-			h.Highlighted = true
+		} else if !h.Highlighted {
+			// Clone before mutating to avoid affecting other cells that share
+			// this *TermTextGridStyle pointer (bulk blank padding from cursor
+			// jumps or erase sequences creates many cells sharing one pointer).
+			cloned := *h
+			cloned.Highlighted = true
+			cell.Style = &cloned
 		}
 	}
 
