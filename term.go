@@ -723,18 +723,34 @@ func (t *Terminal) invalidateBlinkGridCache() {
 	}
 }
 
-const refreshCoalesceInterval = 16 * time.Millisecond // cap repaints at ~60fps
+const refreshCoalesceInterval = 16 * time.Millisecond // low-graphics mode repaint cap
 
-// scheduleRefresh coalesces rapid PTY output into a single Fyne repaint per
-// ~16ms window. Without this, every individual PTY read (often 1–4 bytes for
-// an echoed character) triggers a full-window software-OpenGL repaint.
+// scheduleRefresh queues a Fyne repaint for the terminal.
+//
+// In normal mode, dirty-region rendering makes individual repaints cheap, so
+// we dispatch immediately — no coalescing delay. The CAS ensures at most one
+// pending Refresh is queued at a time; subsequent PTY reads while a Refresh is
+// in flight are effectively free-ridden on the in-flight Refresh (all cell
+// mutations are visible to the next Refresh regardless of when it fires).
+//
+// In slow-blink (low-graphics) mode the repaint cadence is intentionally
+// throttled to ~60fps via a 16ms timer to avoid driving unnecessary repaints
+// on constrained hardware.
 func (t *Terminal) scheduleRefresh() {
-	if t.refreshScheduled.CompareAndSwap(false, true) {
+	if !t.refreshScheduled.CompareAndSwap(false, true) {
+		return
+	}
+	if widget2.IsSlowBlinkMode() {
 		time.AfterFunc(refreshCoalesceInterval, func() {
 			t.refreshScheduled.Store(false)
 			fyne.Do(t.Refresh)
 		})
+		return
 	}
+	fyne.Do(func() {
+		t.refreshScheduled.Store(false)
+		t.Refresh()
+	})
 }
 
 func (t *Terminal) run() {

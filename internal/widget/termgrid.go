@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"image"
+	"image/color"
 	"math"
 	"sync/atomic"
 	"time"
@@ -26,6 +27,10 @@ const blinkingInterval = 500 * time.Millisecond
 // uploads it as a single texture and issues one GL draw call per repaint —
 // essential for Mesa/llvmpipe on VDI hardware where each GL state-change costs
 // ~250µs.
+//
+// Dirty rendering: each frame compares cell visual state against the previous
+// frame's snapshot and repaints only changed cells, so idle or mostly-static
+// screens (cursor blink, slow output) do near-zero pixel work.
 type TermGrid struct {
 	widget.TextGrid
 
@@ -39,6 +44,29 @@ type TermGrid struct {
 	termCols        int // set by Terminal when the grid is sized
 	termRows        int
 	stretchFontSize float32 // non-zero: render at this font size and let GL stretch to fill
+
+	// Dirty-render snapshot. nil forces a full redraw on the next frame.
+	cellSnaps       []cellSnap
+	lastDirtyBounds image.Rectangle
+	prevDefaultFGU  *image.Uniform
+	prevDefaultBGU  *image.Uniform
+	prevScale       float32
+
+	// lastRenderParams caches the inputs from the most recent drawToImage call
+	// so that DirtyPixelBounds() can pre-scan dirty cells without re-deriving
+	// theme/font parameters from scratch.
+	lastRenderParams renderParams
+}
+
+// renderParams records the inputs needed to call ScanDirtyBounds.
+type renderParams struct {
+	defaultFG, defaultBG color.Color
+	textSizePt           float32
+	monoRes, boldRes     fyne.Resource
+	scale                float32
+	imgW, imgH           int // render-buffer pixel size (may be smaller than target in stretch mode)
+	targetW, targetH     int // actual on-screen pixel size of the widget
+	cols, rows           int
 }
 
 // CreateRenderer is a private method to Fyne which links this widget to its renderer.
@@ -48,12 +76,14 @@ func (t *TermGrid) CreateRenderer() fyne.WidgetRenderer {
 	t.ExtendBaseWidget(t)
 
 	t.raster = canvas.NewRaster(t.drawToImage)
+	t.raster.DirtyReporter = t
 	return widget.NewSimpleRenderer(t.raster)
 }
 
 func (t *TermGrid) drawToImage(w, h int) image.Image {
 	if t.pixBuf == nil || t.pixBuf.Bounds().Dx() != w || t.pixBuf.Bounds().Dy() != h {
 		t.pixBuf = image.NewRGBA(image.Rect(0, 0, w, h))
+		t.cellSnaps = nil // buffer resized — full redraw required
 	}
 
 	cols := t.termCols
@@ -84,6 +114,17 @@ func (t *TermGrid) drawToImage(w, h int) image.Image {
 		}
 	}
 
+	// Invalidate the dirty snapshot when theme colours or scale change so that
+	// cells relying on the default FG/BG are correctly repainted.
+	fgu := getUniform(defaultFG)
+	bgu := getUniform(defaultBG)
+	if fgu != t.prevDefaultFGU || bgu != t.prevDefaultBGU || scale != t.prevScale {
+		t.cellSnaps = nil
+		t.prevDefaultFGU = fgu
+		t.prevDefaultBGU = bgu
+		t.prevScale = scale
+	}
+
 	// Stretch mode: render at the natural font resolution and return a
 	// (possibly smaller) image; Fyne/GL stretches the texture to fill (w, h).
 	if t.stretchFontSize > 0 {
@@ -98,12 +139,17 @@ func (t *TermGrid) drawToImage(w, h int) image.Image {
 		}
 		if t.pixBuf.Bounds().Dx() != renderW || t.pixBuf.Bounds().Dy() != renderH {
 			t.pixBuf = image.NewRGBA(image.Rect(0, 0, renderW, renderH))
+			t.cellSnaps = nil
 		}
-		RenderTermToImage(t.Rows, t.pixBuf, cols, rows, defaultFG, defaultBG, t.stretchFontSize, monoFont, boldFont, scale)
+		t.cellSnaps, t.lastDirtyBounds = RenderTermToImage(t.Rows, t.pixBuf, cols, rows, defaultFG, defaultBG, t.stretchFontSize, monoFont, boldFont, scale, t.cellSnaps)
+		b := t.pixBuf.Bounds()
+		t.lastRenderParams = renderParams{defaultFG, defaultBG, t.stretchFontSize, monoFont, boldFont, scale, b.Dx(), b.Dy(), w, h, cols, rows}
 		return t.pixBuf
 	}
 
-	RenderTermToImage(t.Rows, t.pixBuf, cols, rows, defaultFG, defaultBG, textSizePt, monoFont, boldFont, scale)
+	t.cellSnaps, t.lastDirtyBounds = RenderTermToImage(t.Rows, t.pixBuf, cols, rows, defaultFG, defaultBG, textSizePt, monoFont, boldFont, scale, t.cellSnaps)
+	b := t.pixBuf.Bounds()
+	t.lastRenderParams = renderParams{defaultFG, defaultBG, textSizePt, monoFont, boldFont, scale, b.Dx(), b.Dy(), b.Dx(), b.Dy(), cols, rows}
 	return t.pixBuf
 }
 
@@ -120,6 +166,45 @@ func (t *TermGrid) SetStretchFontSize(pt float32) {
 func (t *TermGrid) SetGridDimensions(cols, rows int) {
 	t.termCols = cols
 	t.termRows = rows
+}
+
+// DirtyPixelBounds implements canvas.DirtyRegionReporter.
+// Pre-scans the current terminal state against cell snaps to return the pixel
+// bounds of what will change in the CURRENT frame's render, not the previous
+// frame's lastDirtyBounds. This prevents the one-frame stale lag that would
+// cause the scissor to miss newly dirty cells (cursor movement, new text, etc.).
+func (t *TermGrid) DirtyPixelBounds() image.Rectangle {
+	p := t.lastRenderParams
+	if p.imgW == 0 {
+		return image.Rectangle{} // no render yet; FBO will be fresh, full repaint guaranteed
+	}
+	// Return the full raster pixel footprint when a full redraw is imminent so
+	// that computeDirtyRect includes the entire raster in the dirty rect rather
+	// than skipping it (an empty return skips the raster, leaving a small cursor-
+	// only scissor that clips the raster repaint to the wrong area).
+	//
+	// Full redraw is imminent when:
+	//   • cellSnaps is nil — buffer was resized or scale/theme changed
+	//   • grid dimensions changed — SetGridDimensions was called since last render
+	if t.cellSnaps == nil || p.cols != t.termCols || p.rows != t.termRows {
+		return image.Rect(0, 0, p.targetW, p.targetH)
+	}
+	bounds := ScanDirtyBounds(t.Rows, p.imgW, p.imgH, p.cols, p.rows,
+		p.defaultFG, p.defaultBG, p.textSizePt, p.monoRes, p.boldRes, p.scale, t.cellSnaps)
+	if bounds.Empty() || p.targetW == p.imgW {
+		return bounds
+	}
+	// Stretch mode: the render buffer is smaller than the widget's on-screen
+	// footprint. Scale dirty bounds from render-buffer space to widget pixel
+	// space so that computeDirtyRect places the scissor correctly.
+	scaleX := float64(p.targetW) / float64(p.imgW)
+	scaleY := float64(p.targetH) / float64(p.imgH)
+	return image.Rect(
+		int(float64(bounds.Min.X)*scaleX),
+		int(float64(bounds.Min.Y)*scaleY),
+		int(math.Ceil(float64(bounds.Max.X)*scaleX)),
+		int(math.Ceil(float64(bounds.Max.Y)*scaleY)),
+	)
 }
 
 // MinSize returns the minimum pixel size for the configured grid dimensions.
@@ -177,11 +262,9 @@ func (t *TermGrid) refreshBlink(blink bool) {
 			t.tickerCancel()
 			t.tickerCancel = nil
 		}
-		fyne.Do(func() {
-			if t.raster != nil {
-				t.raster.Refresh()
-			}
-		})
+		if t.raster != nil {
+			t.raster.Refresh()
+		}
 		return
 	}
 
@@ -202,11 +285,9 @@ func (t *TermGrid) refreshBlink(blink bool) {
 		t.mayContainBlink.Store(false)
 	}
 
-	fyne.Do(func() {
-		if t.raster != nil {
-			t.raster.Refresh()
-		}
-	})
+	if t.raster != nil {
+		t.raster.Refresh()
+	}
 
 	switch {
 	case shouldBlink && t.tickerCancel == nil:

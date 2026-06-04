@@ -146,12 +146,28 @@ func getUniform(c color.Color) *image.Uniform {
 
 // ------------------- per-frame pixel rendering -----------------------------
 
-// RenderTermToImage composites all terminal cells into img.
+// cellSnap records the resolved visual state of one terminal cell.
+// Pointer equality on fgU/bgU is valid because getUniform returns one
+// canonical *image.Uniform per distinct RGBA value.
+type cellSnap struct {
+	r         rune
+	fgU       *image.Uniform
+	bgU       *image.Uniform // nil = use default background
+	bold      bool
+	underline bool
+}
+
+// RenderTermToImage composites terminal cells into img.
 // img must already be allocated to the correct pixel dimensions.
 // cols / numRows are the grid dimensions.
 // monoRes and boldRes must be the same font resources the theme returns for
 // Monospace and Bold+Monospace styles respectively.
 // scale is the canvas pixel-to-point ratio (1.0 on standard displays, 2.0 on HiDPI/Retina).
+//
+// snaps is the cell snapshot from the previous frame (nil or wrong length forces
+// a full redraw). Returns the updated snapshot and the pixel-space bounding
+// rectangle of all cells that were repainted. On a full redraw the dirty rect
+// equals img.Bounds(). On a no-op frame (nothing changed) it is image.Rectangle{}.
 func RenderTermToImage(
 	rows []widget.TextGridRow,
 	img *image.RGBA,
@@ -160,28 +176,43 @@ func RenderTermToImage(
 	textSizePt float32,
 	monoRes, boldRes fyne.Resource,
 	scale float32,
-) {
+	snaps []cellSnap,
+) ([]cellSnap, image.Rectangle) {
 	fd := getRasterFont(textSizePt, monoRes, boldRes, scale)
 	if fd == nil || fd.mono == nil {
-		return
+		return snaps, image.Rectangle{}
 	}
 
 	w := img.Bounds().Dx()
 	h := img.Bounds().Dy()
 	if w == 0 || h == 0 || cols == 0 || numRows == 0 {
-		return
+		return snaps, image.Rectangle{}
 	}
 
 	cw := w / cols
 	ch := h / numRows
 	if cw <= 0 || ch <= 0 {
-		return
+		return snaps, image.Rectangle{}
 	}
 
-	// Fill the whole buffer with the default background colour.
-	draw.Draw(img, img.Bounds(), getUniform(defaultBG), image.Point{}, draw.Src)
+	total := cols * numRows
+	fullRedraw := len(snaps) != total
+	if fullRedraw {
+		// Fill the whole buffer with the default background colour.
+		draw.Draw(img, img.Bounds(), getUniform(defaultBG), image.Point{}, draw.Src)
+		snaps = make([]cellSnap, total)
+	}
 
 	defaultFGUniform := getUniform(defaultFG)
+	defaultBGUniform := getUniform(defaultBG)
+
+	// dirtyRect accumulates the pixel bounds of every cell repainted this frame.
+	// For a full redraw it is set to img.Bounds() upfront; otherwise it grows
+	// as dirty cells are found so callers can use it for sub-texture uploads.
+	var dirtyRect image.Rectangle
+	if fullRedraw {
+		dirtyRect = img.Bounds()
+	}
 
 	for rowIdx := 0; rowIdx < numRows; rowIdx++ {
 		var cells []widget.TextGridCell
@@ -213,6 +244,20 @@ func RenderTermToImage(
 					useUnderline = s.Underline
 				}
 			}
+
+			snap := cellSnap{r, fgUniform, bgUniform, useBold, useUnderline}
+			snapIdx := rowIdx*cols + colIdx
+			if !fullRedraw {
+				if snaps[snapIdx] == snap {
+					continue // cell unchanged — leave pixel buffer as-is
+				}
+				// Restore default background before overpainting this cell.
+				draw.Draw(img, image.Rect(colIdx*cw, rowIdx*ch, colIdx*cw+cw, rowIdx*ch+ch), defaultBGUniform, image.Point{}, draw.Src)
+				// Expand dirty rect to include this cell (allow +1px for descenders).
+				cellBounds := image.Rect(colIdx*cw, rowIdx*ch, colIdx*cw+cw, min(rowIdx*ch+ch+1, h))
+				dirtyRect = dirtyRect.Union(cellBounds)
+			}
+			snaps[snapIdx] = snap
 
 			x0 := colIdx * cw
 			y0 := rowIdx * ch
@@ -261,4 +306,79 @@ func RenderTermToImage(
 			d.DrawString(string(r))
 		}
 	}
+	return snaps, dirtyRect
+}
+
+// ScanDirtyBounds returns the pixel bounding rect of all cells that differ from
+// snaps without performing any pixel rendering. Used by DirtyPixelBounds() to
+// compute the CURRENT frame's dirty rect before drawToImage runs, avoiding the
+// one-frame stale lag that lastDirtyBounds would produce.
+//
+// Returns the full image bounds when snaps are nil/wrong length (full redraw).
+// Returns image.Rectangle{} when nothing has changed.
+func ScanDirtyBounds(
+	rows []widget.TextGridRow,
+	imgW, imgH int,
+	cols, numRows int,
+	defaultFG, defaultBG color.Color,
+	textSizePt float32,
+	monoRes, boldRes fyne.Resource,
+	scale float32,
+	snaps []cellSnap,
+) image.Rectangle {
+	if imgW == 0 || imgH == 0 || cols == 0 || numRows == 0 {
+		return image.Rectangle{}
+	}
+	if len(snaps) != cols*numRows {
+		return image.Rect(0, 0, imgW, imgH) // full redraw
+	}
+	cw := imgW / cols
+	ch := imgH / numRows
+	if cw <= 0 || ch <= 0 {
+		return image.Rectangle{}
+	}
+
+	defaultFGUniform := getUniform(defaultFG)
+	_ = getUniform(defaultBG)
+
+	fd := getRasterFont(textSizePt, monoRes, boldRes, scale)
+
+	var dirty image.Rectangle
+	for rowIdx := 0; rowIdx < numRows; rowIdx++ {
+		var cells []widget.TextGridCell
+		if rowIdx < len(rows) {
+			cells = rows[rowIdx].Cells
+		}
+		for colIdx := 0; colIdx < cols; colIdx++ {
+			var r rune = ' '
+			fgUniform := defaultFGUniform
+			var bgUniform *image.Uniform
+			useBold := false
+			useUnderline := false
+			if colIdx < len(cells) {
+				cell := cells[colIdx]
+				if cell.Rune != 0 {
+					r = cell.Rune
+				}
+				if cell.Style != nil {
+					if c := cell.Style.TextColor(); c != nil {
+						fgUniform = getUniform(c)
+					}
+					if c := cell.Style.BackgroundColor(); c != nil {
+						bgUniform = getUniform(c)
+					}
+					s := cell.Style.Style()
+					useBold = s.Bold && fd != nil && fd.bold != nil
+					useUnderline = s.Underline
+				}
+			}
+			snap := cellSnap{r, fgUniform, bgUniform, useBold, useUnderline}
+			if snaps[rowIdx*cols+colIdx] == snap {
+				continue
+			}
+			cellBounds := image.Rect(colIdx*cw, rowIdx*ch, colIdx*cw+cw, min(rowIdx*ch+ch+1, imgH))
+			dirty = dirty.Union(cellBounds)
+		}
+	}
+	return dirty
 }

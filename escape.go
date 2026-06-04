@@ -238,10 +238,6 @@ func (t *Terminal) moveCursor(row, col int) {
 	t.cursorCol = col
 	t.cursorRow = row
 
-	if t.cursorMoved != nil {
-		fyne.Do(t.cursorMoved)
-	}
-
 	if t.cursorChangeCallback != nil {
 		fyne.Do(func() {
 			defer func() {

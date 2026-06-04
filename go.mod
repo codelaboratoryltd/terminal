@@ -46,6 +46,4 @@ require (
 
 replace golang.org/x/sys => golang.org/x/sys v0.23.0
 
-//replace fyne.io/fyne/v2 => github.com/drunlade/fyne/v2 v2.0.0-20260601072504-2bcfb45834c2
-
-//replace fyne.io/fyne/v2 => github.com/drunlade/fyne/v2 v2.0.0-20260601072504-2bcfb45834c2
+replace fyne.io/fyne/v2 => /Users/dfj/go/src/github.com/drunlade/fyne
