@@ -69,18 +69,11 @@ func (r *render) Layout(s fyne.Size) {
 				r.term.contentThemer.textSize = best
 				r.term.invalidateCellCache()
 
-				// Force immediate refresh
 				if r.term.contentWrapper != nil {
-					fyne.Do(func() {
-						r.term.contentWrapper.Refresh()
-					})
+					r.term.contentWrapper.Refresh()
 				}
-
-				// Force the content to re-render immediately with new font
 				if r.term.content != nil {
-					fyne.Do(func() {
-						r.term.content.Refresh()
-					})
+					r.term.content.Refresh()
 				}
 			}
 		} else if r.term.fixedFontSize == 0 {
@@ -98,14 +91,10 @@ func (r *render) Layout(s fyne.Size) {
 				r.term.contentThemer.textSize = best
 				r.term.invalidateCellCache()
 				if r.term.contentWrapper != nil {
-					fyne.Do(func() {
-						r.term.contentWrapper.Refresh()
-					})
+					r.term.contentWrapper.Refresh()
 				}
 				if r.term.content != nil {
-					fyne.Do(func() {
-						r.term.content.Refresh()
-					})
+					r.term.content.Refresh()
 				}
 			}
 		}
@@ -117,10 +106,7 @@ func (r *render) Layout(s fyne.Size) {
 			sizeChanged = true
 			r.term.invalidateCellCache()
 			if r.term.contentWrapper != nil {
-				// Schedule refresh on main thread to avoid Fyne thread errors
-				fyne.Do(func() {
-					r.term.contentWrapper.Refresh()
-				})
+				r.term.contentWrapper.Refresh()
 			}
 		}
 	}
@@ -470,10 +456,7 @@ func (t *Terminal) refreshCursor() {
 	// Ensure blinking is active/paused based on current state
 	t.ensureCursorBlinking()
 
-	fyne.Do(func() {
-		t.cursor.Refresh()
-	})
-
+	t.cursor.Refresh()
 }
 
 // CreateRenderer requests a new renderer for this terminal (just a wrapper around the TextGrid)
