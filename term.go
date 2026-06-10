@@ -131,6 +131,8 @@ type Terminal struct {
 	cursorChangeCallback       func(x, y int)
 	keyDownCallback            func(*fyne.KeyEvent)
 	keyUpCallback              func(*fyne.KeyEvent)
+	firstOutputFired bool
+	onFirstOutput    func()
 
 	lastDoubleTapTime time.Time
 
@@ -302,6 +304,12 @@ func (t *Terminal) SetKeyDownCallback(f func(*fyne.KeyEvent)) {
 // reaches the terminal. See SetKeyDownCallback. Pass nil to clear.
 func (t *Terminal) SetKeyUpCallback(f func(*fyne.KeyEvent)) {
 	t.keyUpCallback = f
+}
+
+// SetOnFirstOutput registers a callback invoked exactly once when the terminal
+// receives its first non-empty output. Safe to call before RunWithConnection.
+func (t *Terminal) SetOnFirstOutput(f func()) {
+	t.onFirstOutput = f
 }
 
 // AcceptsTab indicates that this widget will use the Tab key (avoids loss of focus).
@@ -597,6 +605,23 @@ func (t *Terminal) Text() string {
 	return t.content.Text()
 }
 
+// hasVisibleContent reports whether the content grid contains at least one
+// non-space printable rune. Called from the run() goroutine only, which is the
+// same goroutine that writes to t.content.Rows via handleOutput — no race.
+func (t *Terminal) hasVisibleContent() bool {
+	if t.content == nil {
+		return false
+	}
+	for _, row := range t.content.Rows {
+		for _, cell := range row.Cells {
+			if cell.Rune != 0 && cell.Rune != ' ' {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // ExitCode returns the exit code from the terminal's shell.
 // Returns -1 if called before shell was started or before shell exited.
 // Also returns -1 if shell was terminated by a signal.
@@ -798,6 +823,10 @@ func (t *Terminal) run() {
 		leftOver = t.handleOutput(fullBuf[:num])
 		if len(leftOver) == 0 {
 			t.scheduleRefresh()
+		}
+		if !t.firstOutputFired && t.onFirstOutput != nil && t.hasVisibleContent() {
+			t.firstOutputFired = true
+			t.onFirstOutput()
 		}
 	}
 }
