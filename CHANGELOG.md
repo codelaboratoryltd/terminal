@@ -5,6 +5,13 @@ This project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased] - 2025-09-16
 
+## [0.1.37]
+### Changed
+- Further improvements to the dirty region renderer and stretch-to-fit mode
+### Fixed
+- Fix various places where we use Fyne Do/DoWait incorrectly
+- Fix various places where we might trigger runtime race conditions (crash to desktop)
+
 ## [0.1.36]
 ### Fixed
 - Fix selection highlight bleeding into blank cells
