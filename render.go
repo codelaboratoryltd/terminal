@@ -15,6 +15,11 @@ import (
 const (
 	cursorWidthBlock = 0 // 0 means use full cell width for block cursor
 	cursorWidthCaret = 2 // 2 pixels wide for caret cursor
+
+	// stretchMinFontSize is the floor applied to the render font size in
+	// stretch-to-fit mode. The window-fitted size is used when it is larger,
+	// so the raster scales up with the window but never drops below this value.
+	stretchMinFontSize float32 = 36.0
 )
 
 type render struct {
@@ -138,7 +143,11 @@ func (r *render) Layout(s fyne.Size) {
 	if r.term.stretchToFit && r.term.fixedPTY {
 		displayW = s.Width
 		displayH = s.Height
-		r.term.content.SetStretchFontSize(r.term.fixedFontSize)
+		stretchSize := r.term.fixedFontSize
+		if stretchSize < stretchMinFontSize {
+			stretchSize = stretchMinFontSize
+		}
+		r.term.content.SetStretchFontSize(stretchSize)
 	} else {
 		displayW = gridWidth
 		displayH = gridHeight
