@@ -283,9 +283,19 @@ func RenderTermToImage(
 			}
 
 			// Skip glyphs absent from the face rather than letting font.Drawer
-			// substitute the □ replacement character.
+			// substitute the □ replacement character. Some fonts (e.g. DejaVu
+			// Sans Mono Bold) lack box-drawing/block glyphs that the Regular
+			// face has, so fall back to the regular face before giving up —
+			// those runes are weight-agnostic line art and look fine unbolded.
 			if _, ok := face.GlyphAdvance(r); !ok {
-				continue
+				if face != fd.mono {
+					if _, ok = fd.mono.GlyphAdvance(r); ok {
+						face = fd.mono
+					}
+				}
+				if _, ok := face.GlyphAdvance(r); !ok {
+					continue
+				}
 			}
 
 			// Clip to cell bounds so any glyph side-bearing never bleeds into

@@ -5,6 +5,10 @@ This project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased] - 2025-09-16
 
+## [0.1.38]
+### Fixed
+ - Fallback to non-bold font if character is not available in bold font
+
 ## [0.1.37]
 ### Changed
 - Further improvements to the dirty region renderer and stretch-to-fit mode
