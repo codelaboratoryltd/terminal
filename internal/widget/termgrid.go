@@ -6,6 +6,7 @@ import (
 	"image"
 	"image/color"
 	"math"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -37,6 +38,16 @@ type TermGrid struct {
 	tickerCancel context.CancelFunc
 	// mayContainBlink is true until a refresh finds no BlinkEnabled cells; then false skips O(n) scans.
 	mayContainBlink atomic.Bool
+
+	// rowsMu guards the embedded TextGrid.Rows slice (and the Cells slices it
+	// holds) against concurrent access. The PTY reader goroutine mutates Rows via
+	// the Terminal's handleOutput (appends rows, reallocates Cells, swaps the
+	// Rows slice on scroll/clear), while the Fyne paint goroutine reads Rows
+	// during raster generation (drawToImage / DirtyPixelBounds) and UI handlers
+	// read it on the main goroutine. Without this lock a paint that overlaps a
+	// reallocation can observe a torn slice header (new pointer, stale length)
+	// and fault — the resize-while-output crash. Writers take Lock; readers RLock.
+	rowsMu sync.RWMutex
 
 	// Raster renderer state.
 	raster          *canvas.Raster
@@ -141,13 +152,17 @@ func (t *TermGrid) drawToImage(w, h int) image.Image {
 			t.pixBuf = image.NewRGBA(image.Rect(0, 0, renderW, renderH))
 			t.cellSnaps = nil
 		}
+		t.RLockRows()
 		t.cellSnaps, t.lastDirtyBounds = RenderTermToImage(t.Rows, t.pixBuf, cols, rows, defaultFG, defaultBG, t.stretchFontSize, monoFont, boldFont, scale, t.cellSnaps)
+		t.RUnlockRows()
 		b := t.pixBuf.Bounds()
 		t.lastRenderParams = renderParams{defaultFG, defaultBG, t.stretchFontSize, monoFont, boldFont, scale, b.Dx(), b.Dy(), w, h, cols, rows}
 		return t.pixBuf
 	}
 
+	t.RLockRows()
 	t.cellSnaps, t.lastDirtyBounds = RenderTermToImage(t.Rows, t.pixBuf, cols, rows, defaultFG, defaultBG, textSizePt, monoFont, boldFont, scale, t.cellSnaps)
+	t.RUnlockRows()
 	b := t.pixBuf.Bounds()
 	t.lastRenderParams = renderParams{defaultFG, defaultBG, textSizePt, monoFont, boldFont, scale, b.Dx(), b.Dy(), b.Dx(), b.Dy(), cols, rows}
 	return t.pixBuf
@@ -167,6 +182,18 @@ func (t *TermGrid) SetGridDimensions(cols, rows int) {
 	t.termCols = cols
 	t.termRows = rows
 }
+
+// LockRows / UnlockRows acquire the write side of the Rows guard. Callers that
+// reallocate or reassign Rows / a row's Cells (the PTY output path) must hold it.
+func (t *TermGrid) LockRows()   { t.rowsMu.Lock() }
+func (t *TermGrid) UnlockRows() { t.rowsMu.Unlock() }
+
+// RLockRows / RUnlockRows acquire the read side of the Rows guard. Callers that
+// iterate or index Rows off the writer goroutine (paint, UI reads) must hold it.
+// Do not nest RLock on the same goroutine — RWMutex deadlocks a recursive RLock
+// if a writer is waiting.
+func (t *TermGrid) RLockRows()   { t.rowsMu.RLock() }
+func (t *TermGrid) RUnlockRows() { t.rowsMu.RUnlock() }
 
 // DirtyPixelBounds implements canvas.DirtyRegionReporter.
 // Pre-scans the current terminal state against cell snaps to return the pixel
@@ -189,8 +216,10 @@ func (t *TermGrid) DirtyPixelBounds() image.Rectangle {
 	if t.cellSnaps == nil || p.cols != t.termCols || p.rows != t.termRows {
 		return image.Rect(0, 0, p.targetW, p.targetH)
 	}
+	t.RLockRows()
 	bounds := ScanDirtyBounds(t.Rows, p.imgW, p.imgH, p.cols, p.rows,
 		p.defaultFG, p.defaultBG, p.textSizePt, p.monoRes, p.boldRes, p.scale, t.cellSnaps)
+	t.RUnlockRows()
 	if bounds.Empty() || p.targetW == p.imgW {
 		return bounds
 	}

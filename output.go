@@ -102,6 +102,18 @@ type parseState struct {
 }
 
 func (t *Terminal) handleOutput(buf []byte) []byte {
+	// Guard the whole apply-a-PTY-buffer pass: every Rows/Cells mutation reached
+	// from here (appends, scroll swaps, clears, per-rune writes) happens under the
+	// write lock so the paint goroutine never reads a half-reallocated Rows slice.
+	// Locking once per buffer (not per rune) keeps this off the hot path. Inner
+	// helpers (clearSelectedText, scroll, escape handlers) must not re-acquire it.
+	// content is nil only when handleOutput is driven directly (unit tests) before
+	// a renderer exists; the production run() path guards content != nil first.
+	if c := t.content; c != nil {
+		c.LockRows()
+		defer c.UnlockRows()
+	}
+
 	if t.hasSelectedText() {
 		t.clearSelectedText()
 	}

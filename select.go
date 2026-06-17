@@ -81,6 +81,10 @@ func (t *Terminal) clearSelectedText() {
 // SelectedText gets the text that is currently selected.
 func (t *Terminal) SelectedText() string {
 	sr, sc, er, ec := t.getSelectedRange()
+	// Read under the read lock; the PTY goroutine may be reallocating Rows.
+	// No caller holds the Rows lock when reaching here, so this never nests.
+	t.content.RLockRows()
+	defer t.content.RUnlockRows()
 	return widget2.GetTextRange(t.content, t.blockMode, sr, sc, er, ec)
 }
 

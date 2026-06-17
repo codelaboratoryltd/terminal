@@ -397,18 +397,25 @@ func (t *Terminal) DoubleTapped(pe *fyne.PointEvent) {
 		t.clearSelectedText()
 	}
 
+	// Read Rows under the read lock: the PTY goroutine may be reallocating it.
+	// Snapshot the row's Cells into a local slice, then release before the
+	// word-boundary scan / highlight / clipboard work, which don't touch Rows.
+	t.content.RLockRows()
 	if row < 1 || row > len(t.content.Rows) {
+		t.content.RUnlockRows()
 		return
 	}
 
 	// Additional safety check to prevent index out of bounds
 	rowIndex := row - 1
 	if rowIndex < 0 || rowIndex >= len(t.content.Rows) {
+		t.content.RUnlockRows()
 		println(fmt.Sprintf("WARNING: DoubleTapped rowIndex %d out of bounds for Rows length %d (row=%d)", rowIndex, len(t.content.Rows), row))
 		return
 	}
 
 	rowContent := t.content.Rows[rowIndex].Cells
+	t.content.RUnlockRows()
 
 	if col < 0 || col >= len(rowContent) {
 		return // No valid character under the cursor, do nothing
@@ -602,6 +609,9 @@ func (t *Terminal) Tapped(ev *fyne.PointEvent) {
 
 // Text returns the contents of the buffer as a single string joined with `\n` (no style information).
 func (t *Terminal) Text() string {
+	// Read under the read lock; the PTY goroutine may be reallocating Rows.
+	t.content.RLockRows()
+	defer t.content.RUnlockRows()
 	return t.content.Text()
 }
 
