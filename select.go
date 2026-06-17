@@ -107,7 +107,7 @@ func (t *Terminal) pasteText(clipboard fyne.Clipboard) {
 
 	if t.bracketedPasteMode {
 		// In bracketed paste mode, wrap content with escape sequences
-		_, _ = t.in.Write(append(
+		_, _ = t.writeInput(append(
 			append(
 				[]byte{asciiEscape, '[', '2', '0', '0', '~'},
 				[]byte(content)...),
@@ -117,7 +117,7 @@ func (t *Terminal) pasteText(clipboard fyne.Clipboard) {
 	}
 
 	// Normal paste without bracketing
-	_, _ = t.in.Write([]byte(content))
+	_, _ = t.writeInput([]byte(content))
 }
 
 func (t *Terminal) hasSelectedText() bool {

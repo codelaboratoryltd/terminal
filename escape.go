@@ -782,7 +782,7 @@ func escapeDeviceStatusReport(t *Terminal, msg string) {
 	// msg can be a single number like "5" or "6"
 	if msg == "5" {
 		// Device Status Report: ready
-		_, _ = t.in.Write([]byte{asciiEscape, '[', '0', 'n'})
+		_, _ = t.writeInput([]byte{asciiEscape, '[', '0', 'n'})
 		return
 	}
 	if msg == "6" {
@@ -794,7 +794,7 @@ func escapeDeviceStatusReport(t *Terminal, msg string) {
 		resp = append(resp, ';')
 		resp = append(resp, []byte(strconv.Itoa(col))...)
 		resp = append(resp, 'R')
-		_, _ = t.in.Write(resp)
+		_, _ = t.writeInput(resp)
 		return
 	}
 	if t.debug {
@@ -889,10 +889,10 @@ func escapeDeviceAttribute(t *Terminal, code string) {
 	switch code[0] {
 	case '>':
 		// DA2: Identify terminal type/version. Reply as xterm-256color-ish: CSI > 0 ; 115 ; 0 c
-		_, _ = t.in.Write([]byte{asciiEscape, '[', '>', '0', ';', '1', '1', '5', ';', '0', 'c'})
+		_, _ = t.writeInput([]byte{asciiEscape, '[', '>', '0', ';', '1', '1', '5', ';', '0', 'c'})
 	default:
 		// DA1: Report VT220 (CSI ? 1 ; 2 c would be explicit). Use simple VT220 response: CSI ? 6 c
-		_, _ = t.in.Write([]byte{asciiEscape, '[', '?', '6', 'c'})
+		_, _ = t.writeInput([]byte{asciiEscape, '[', '?', '6', 'c'})
 	}
 }
 
@@ -921,7 +921,7 @@ func escapeWindowManipulation(t *Terminal, msg string) {
 	case 14:
 		// Report window size in pixels - respond with dummy size
 		// Format: ESC [ 4 ; height ; width t
-		_, _ = t.in.Write([]byte{asciiEscape, '[', '4', ';', '6', '0', '0', ';', '8', '0', '0', 't'})
+		_, _ = t.writeInput([]byte{asciiEscape, '[', '4', ';', '6', '0', '0', ';', '8', '0', '0', 't'})
 	case 18:
 		// Report window size in characters
 		// Format: ESC [ 8 ; rows ; cols t
@@ -934,7 +934,7 @@ func escapeWindowManipulation(t *Terminal, msg string) {
 			cols = 80
 		}
 		response := fmt.Sprintf("%c[8;%d;%dt", asciiEscape, rows, cols)
-		_, _ = t.in.Write([]byte(response))
+		_, _ = t.writeInput([]byte(response))
 	default:
 		if t.debug {
 			log.Println("Unsupported window manipulation command:", command)

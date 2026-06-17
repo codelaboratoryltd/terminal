@@ -120,8 +120,15 @@ type Terminal struct {
 	cleaningUp bool
 
 	pty io.Closer
-	in  io.WriteCloser
-	out io.Reader
+	// ioMu guards assignment of in/out (done once at connection setup on the
+	// run-setup goroutine) against reads from the UI goroutine (Write, keyboard
+	// input, paste). Without it a UI write landing during connection setup could
+	// observe a torn interface value. Writers go through writeInput; the run
+	// goroutine's own reads of out are ordered after the assignment by the
+	// `go run()` edge and don't need the lock.
+	ioMu sync.RWMutex
+	in   io.WriteCloser
+	out  io.Reader
 
 	bell, bold, debug, focused bool
 	currentFG, currentBG       color.Color
@@ -681,10 +688,12 @@ func (t *Terminal) open() error {
 		return err
 	}
 
+	t.ioMu.Lock()
 	t.in, t.out = in, out
 	if t.readWriterConfigurator != nil {
 		t.out, t.in = t.readWriterConfigurator.SetupReadWriter(out, in)
 	}
+	t.ioMu.Unlock()
 
 	t.pty = pty
 
@@ -873,10 +882,12 @@ func (t *Terminal) RunWithConnection(in io.WriteCloser, out io.Reader) error {
 	for t.config.Columns == 0 { // don't load the TTY until our output is configured
 		time.Sleep(time.Millisecond * 50)
 	}
+	t.ioMu.Lock()
 	t.in, t.out = in, out
 	if t.readWriterConfigurator != nil {
 		t.out, t.in = t.readWriterConfigurator.SetupReadWriter(out, in)
 	}
+	t.ioMu.Unlock()
 
 	t.run()
 
@@ -886,11 +897,21 @@ func (t *Terminal) RunWithConnection(in io.WriteCloser, out io.Reader) error {
 // Write is used to send commands into an open terminal connection.
 // Errors will be returned if the connection is not established, has closed, or there was a problem in transmission.
 func (t *Terminal) Write(b []byte) (int, error) {
-	if t.in == nil {
+	return t.writeInput(b)
+}
+
+// writeInput sends bytes to the PTY/connection input, reading the in writer
+// under the io guard so it can't tear against connection setup. Returns io.EOF
+// if input isn't established yet. All keyboard/paste/escape-response writes go
+// through here so there is a single synchronised reader of the in field.
+func (t *Terminal) writeInput(b []byte) (int, error) {
+	t.ioMu.RLock()
+	w := t.in
+	t.ioMu.RUnlock()
+	if w == nil {
 		return 0, io.EOF
 	}
-
-	return t.in.Write(b)
+	return w.Write(b)
 }
 
 func (t *Terminal) setupShortcuts() {
