@@ -16,10 +16,23 @@ const (
 	cursorWidthBlock = 0 // 0 means use full cell width for block cursor
 	cursorWidthCaret = 2 // 2 pixels wide for caret cursor
 
-	// stretchMinFontSize is the floor applied to the render font size in
-	// stretch-to-fit mode. The window-fitted size is used when it is larger,
-	// so the raster scales up with the window but never drops below this value.
-	stretchMinFontSize float32 = 36.0
+	// stretchSupersample is the factor by which the render font size exceeds the
+	// size that would map the limiting grid axis 1:1 onto the display in
+	// stretch-to-fit mode. Rendering larger than required and letting GL scale
+	// the raster down is a supersample (SSAA): glyph edges are rasterised at
+	// higher resolution and averaged down, which stays crisp. 2x is the classic
+	// sweet spot — enough to look sharp, but bounded so the down-scale never
+	// reaches the ratios where bilinear minification (no mipmaps) aliases into
+	// jagged text. Because it is applied to the smaller of the two axis fits, no
+	// axis is ever down-scaled by more than this factor.
+	stretchSupersample float32 = 2.0
+
+	// Bounds for the resulting render font size in stretch-to-fit mode. They
+	// only guard against degenerate windows (min) and unbounded raster buffers
+	// on very large displays (max); they do not affect how large the text
+	// appears, which is governed entirely by the widget size.
+	stretchMinFontSize float32 = 10.0
+	stretchMaxFontSize float32 = 200.0
 )
 
 type render struct {
@@ -129,9 +142,33 @@ func (r *render) Layout(s fyne.Size) {
 	if r.term.stretchToFit && r.term.fixedPTY {
 		displayW = s.Width
 		displayH = s.Height
-		stretchSize := r.term.fixedFontSize
+		// Supersample the source raster. gridWidth/gridHeight are the grid's
+		// natural extent at fixedFontSize, so scaling fixedFontSize by
+		// displayDim/gridDim gives the font size at which that axis maps 1:1
+		// onto the display. We take the smaller of the two (the limiting axis)
+		// and render stretchSupersample times larger, so GL scales the raster
+		// down rather than up: rendering larger and down-sampling is a
+		// supersample that keeps glyph edges crisp, whereas rendering at or
+		// below 1:1 lets GL up-scale and visibly softens the text. Anchoring to
+		// the smaller axis bounds the down-scale to the supersample factor, so
+		// it never reaches the ratio where minification aliases into jaggies.
+		// Apparent text size is unchanged — GL still stretches the raster to
+		// fill the whole widget; only sharpness changes.
+		stretchSize := r.term.fixedFontSize * stretchSupersample
+		if gridWidth > 0 && gridHeight > 0 {
+			fitW := r.term.fixedFontSize * displayW / gridWidth
+			fitH := r.term.fixedFontSize * displayH / gridHeight
+			limiting := fitW
+			if fitH < limiting {
+				limiting = fitH
+			}
+			stretchSize = limiting * stretchSupersample
+		}
 		if stretchSize < stretchMinFontSize {
 			stretchSize = stretchMinFontSize
+		}
+		if stretchSize > stretchMaxFontSize {
+			stretchSize = stretchMaxFontSize
 		}
 		r.term.content.SetStretchFontSize(stretchSize)
 	} else {
