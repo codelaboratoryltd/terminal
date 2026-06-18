@@ -1442,6 +1442,19 @@ func (t *Terminal) SetSlowTextBlink(on bool) {
 	}
 }
 
+// SetForcedFullRefresh, when on, disables the dirty-region render optimisation and
+// repaints the whole grid every frame. The app enables this when the bundled Mesa
+// software renderer is NOT the active GL backend: the dirty-region/scissor path has
+// shown artifacts on some hardware GL drivers, while the full-refresh path is the
+// known-good fallback there; under Mesa it stays off so partial repaints keep
+// software rendering cheap. See widget.SetForceFullRefresh.
+func (t *Terminal) SetForcedFullRefresh(on bool) {
+	widget2.SetForceFullRefresh(on)
+	if t.content != nil {
+		t.content.Refresh()
+	}
+}
+
 func (t *Terminal) startCursorBlink() {
 	if t.cursorBlinkCancel != nil {
 		return

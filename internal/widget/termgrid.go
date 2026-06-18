@@ -97,6 +97,13 @@ func (t *TermGrid) drawToImage(w, h int) image.Image {
 		t.cellSnaps = nil // buffer resized — full redraw required
 	}
 
+	// Full-refresh mode (non-Mesa backends): drop the dirty snapshot every frame so
+	// RenderTermToImage re-rasterises the entire grid instead of only changed cells
+	// — the pre-dirty-region path. See forceFullRefresh in termgridhelper.go.
+	if IsForceFullRefresh() {
+		t.cellSnaps = nil
+	}
+
 	cols := t.termCols
 	rows := t.termRows
 	if cols == 0 || rows == 0 || w == 0 || h == 0 {
@@ -204,6 +211,12 @@ func (t *TermGrid) DirtyPixelBounds() image.Rectangle {
 	p := t.lastRenderParams
 	if p.imgW == 0 {
 		return image.Rectangle{} // no render yet; FBO will be fresh, full repaint guaranteed
+	}
+	// Full-refresh mode (non-Mesa backends): repaint the whole widget so the scissor
+	// never clips to a partial dirty rect — the pre-dirty-region path. See
+	// forceFullRefresh in termgridhelper.go.
+	if IsForceFullRefresh() {
+		return image.Rect(0, 0, p.targetW, p.targetH)
 	}
 	// Return the full raster pixel footprint when a full redraw is imminent so
 	// that computeDirtyRect includes the entire raster in the dirty rect rather

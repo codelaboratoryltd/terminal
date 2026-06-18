@@ -28,6 +28,27 @@ func IsSlowBlinkMode() bool {
 	return slowBlinkMode.Load()
 }
 
+// forceFullRefresh, when true, disables the dirty-region render optimisation and
+// repaints the whole grid on every frame (the pre-dirty-region behaviour). The app
+// enables this when the bundled Mesa software renderer is NOT the active GL backend:
+// the dirty-region / scissor path has shown artifacts on some hardware GL drivers,
+// while the full-refresh path is known-good there; under Mesa (software rendering)
+// the dirty-region path is kept because full CPU repaints are expensive. Process-
+// wide for the same reason as slowBlinkMode — one render mode at a time.
+var forceFullRefresh atomic.Bool
+
+// SetForceFullRefresh enables or disables whole-grid repaints. See forceFullRefresh.
+func SetForceFullRefresh(on bool) {
+	forceFullRefresh.Store(on)
+}
+
+// IsForceFullRefresh reports the current forceFullRefresh state. Read by the
+// TermGrid render path (drawToImage / DirtyPixelBounds) to bypass dirty-region
+// rendering.
+func IsForceFullRefresh() bool {
+	return forceFullRefresh.Load()
+}
+
 // HighlightRange highlight options to the given range
 // if highlighting has previously been applied it is enabled
 func HighlightRange(t *TermGrid, blockMode bool, startRow, startCol, endRow, endCol int, bitmask byte) {
