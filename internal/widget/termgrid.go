@@ -236,6 +236,34 @@ func (t *TermGrid) DirtyPixelBounds() image.Rectangle {
 	)
 }
 
+// LastDirtyBounds reports, in the same widget-pixel space as DirtyPixelBounds,
+// the region the most recent drawToImage actually repainted. The renderer uses
+// this to self-heal a scissor race: DirtyPixelBounds is scanned to build the FBO
+// dirty rect, but PTY output can mutate Rows between that scan and the render, so
+// the render may touch rows outside the scissor. Those rows are clipped out of
+// the FBO yet marked clean here, so without a follow-up full repaint they stay
+// stale. Comparing this against the scissor lets the renderer detect the spill.
+//
+// Same-goroutine as the paint walk (called right after the raster is drawn), so
+// no lock is needed — it only reads cached render outputs, not Rows.
+func (t *TermGrid) LastDirtyBounds() image.Rectangle {
+	p := t.lastRenderParams
+	b := t.lastDirtyBounds
+	if b.Empty() || p.imgW == 0 || p.imgH == 0 || p.targetW == p.imgW {
+		return b // non-stretch (or nothing rendered): render-buffer space == widget space
+	}
+	// Stretch mode: scale render-buffer bounds up to widget space, matching the
+	// tail of DirtyPixelBounds so the comparison spaces agree.
+	scaleX := float64(p.targetW) / float64(p.imgW)
+	scaleY := float64(p.targetH) / float64(p.imgH)
+	return image.Rect(
+		int(float64(b.Min.X)*scaleX),
+		int(float64(b.Min.Y)*scaleY),
+		int(math.Ceil(float64(b.Max.X)*scaleX)),
+		int(math.Ceil(float64(b.Max.Y)*scaleY)),
+	)
+}
+
 // MinSize returns the minimum pixel size for the configured grid dimensions.
 // This must agree with guessCellSize so that Terminal.Layout positions the grid
 // in the right place.
