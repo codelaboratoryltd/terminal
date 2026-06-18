@@ -298,22 +298,33 @@ func RenderTermToImage(
 				}
 			}
 
-			// Clip to cell bounds so any glyph side-bearing never bleeds into
-			// the adjacent column. font.Drawer respects the destination bounds.
-			// Allow 1 extra pixel at the bottom so fonts that place descenders
-			// (e.g. '_') at the very edge of cellH aren't clipped — mirrors
-			// fyne's TextVectorPad = 1 for canvas.Text. The overflow pixel falls
-			// in the next row's top-most line; if that cell has default background
-			// and its glyph has no ink there, the overflow dot remains visible.
-			// This is the same trade-off fyne's own fix accepts.
-			cellDst := img.SubImage(image.Rect(x0, y0, x0+cw, min(y0+ch+1, h))).(draw.Image)
-			d := xfont.Drawer{
-				Dst:  cellDst,
-				Src:  fgUniform,
-				Face: face,
-				Dot:  fixed.P(x0, y0+fd.ascent),
+			// Draw the glyph straight from the face's mask rather than going
+			// through font.Drawer.DrawString, which allocates a string per cell
+			// (string(r)) and a fresh *image.RGBA header per cell (img.SubImage) —
+			// per-keystroke Go-heap churn. face.Glyph reuses an internal mask
+			// buffer owned by the face, so no per-glyph allocation occurs; the
+			// returned mask is only valid until the next Glyph call, which is fine
+			// here as we blit it immediately under the single-threaded row lock.
+			//
+			// Clip to cell bounds so any glyph side-bearing never bleeds into the
+			// adjacent column. Allow 1 extra pixel at the bottom so fonts that
+			// place descenders (e.g. '_') at the very edge of cellH aren't clipped
+			// — mirrors fyne's TextVectorPad = 1 for canvas.Text. This reproduces
+			// the destination clip the old SubImage provided. When the clip shrinks
+			// the glyph's dest rect, maskp shifts by the same delta so the mask
+			// stays aligned.
+			dot := fixed.P(x0, y0+fd.ascent)
+			dr, mask, maskp, _, ok := face.Glyph(dot, r)
+			if !ok {
+				continue
 			}
-			d.DrawString(string(r))
+			origMin := dr.Min
+			dr = dr.Intersect(image.Rect(x0, y0, x0+cw, min(y0+ch+1, h)))
+			if dr.Empty() {
+				continue
+			}
+			draw.DrawMask(img, dr, fgUniform, image.Point{},
+				mask, maskp.Add(dr.Min.Sub(origMin)), draw.Over)
 		}
 	}
 	return snaps, dirtyRect
