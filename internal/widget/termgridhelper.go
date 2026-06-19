@@ -2,6 +2,7 @@ package widget
 
 import (
 	"image/color"
+	"sync"
 	"sync/atomic"
 
 	"fyne.io/fyne/v2"
@@ -54,12 +55,17 @@ func IsForceFullRefresh() bool {
 func HighlightRange(t *TermGrid, blockMode bool, startRow, startCol, endRow, endCol int, bitmask byte) {
 	applyHighlight := func(cell *widget.TextGridCell) {
 		if h, ok := cell.Style.(*TermTextGridStyle); !ok {
+			var base widget.TextGridStyle
 			if cell.Style != nil {
-				cell.Style = NewTermTextGridStyle(cell.Style.TextColor(), cell.Style.BackgroundColor(), bitmask, false, cell.Style.Style().Bold, cell.Style.Style().Underline)
+				base = NewTermTextGridStyle(cell.Style.TextColor(), cell.Style.BackgroundColor(), bitmask, false, cell.Style.Style().Bold, cell.Style.Style().Underline)
 			} else {
-				cell.Style = NewTermTextGridStyle(nil, nil, bitmask, false, false, false)
+				base = NewTermTextGridStyle(nil, nil, bitmask, false, false, false)
 			}
-			cell.Style.(*TermTextGridStyle).Highlighted = true
+			// NewTermTextGridStyle returns a shared, interned instance, so clone
+			// before flipping Highlighted rather than mutating it in place.
+			cloned := *base.(*TermTextGridStyle)
+			cloned.Highlighted = true
+			cell.Style = &cloned
 		} else if !h.Highlighted {
 			// Clone before mutating to avoid affecting other cells that share
 			// this *TermTextGridStyle pointer (bulk blank padding from cursor
@@ -76,8 +82,10 @@ func HighlightRange(t *TermGrid, blockMode bool, startRow, startCol, endRow, end
 // ClearHighlightRange disables the highlight style for the given range
 func ClearHighlightRange(t *TermGrid, blockMode bool, startRow, startCol, endRow, endCol int) {
 	clearHighlight := func(cell *widget.TextGridCell) {
-		// Check if already highlighted
-		if h, ok := cell.Style.(*TermTextGridStyle); ok {
+		// Only highlighted cells hold a unique (cloned) style; interned instances
+		// are never Highlighted, so guard the write to avoid mutating a shared
+		// instance (and to avoid a needless write race on it).
+		if h, ok := cell.Style.(*TermTextGridStyle); ok && h.Highlighted {
 			h.Highlighted = false
 		}
 	}
@@ -288,21 +296,70 @@ func (h *TermTextGridStyle) Underlined() bool {
 // HighlightOption defines a function type that can modify a TermTextGridStyle.
 type HighlightOption func(h *TermTextGridStyle)
 
-// NewTermTextGridStyle creates a new TextGridStyle with the specified foreground (fg) and background (bg)
-// colors, as well as a bitmask to control the inversion of colors. If fg or bg is nil, the function
-// will use default foreground and background colors from the theme. The bitmask is used to determine
-// which color channels should be inverted.
-//
-// Parameters:
-//   - fg: The foreground color.
-//   - bg: The background color.
-//   - bitmask: The bitmask to control color inversion.
-//   - blinkEnabled: Should this cell blink when told to.
-//
-// Returns:
-//
-//	A pointer to a TermTextGridStyle initialized with the provided colors and inversion settings.
+// styleCacheKey identifies a TermTextGridStyle by its immutable attributes. The
+// fg/bg interface values compare by their concrete (comparable) color type — the
+// same assumption getUniform's colorUniformCache already relies on.
+type styleCacheKey struct {
+	fg, bg                 color.Color
+	bitmask                byte
+	blinkEnabled, bold, ul bool
+}
+
+// Styles are immutable apart from the transient Highlighted/blinked state, which
+// is always applied to a clone (HighlightRange) or shared in-sync across cells
+// with identical attributes (blink). That makes one instance per attribute combo
+// safe to share, so we intern them: handleOutputRune builds a style for every
+// output character, but whole runs of cells share attributes, so without this the
+// terminal allocates a fresh *TermTextGridStyle plus two boxed inverted colours
+// per character — the dominant per-keystroke GC churn, in both render backends.
+const maxStyleCacheEntries = 8192 // bounds growth for 24-bit-colour apps; ~96B each
+
+var (
+	styleCacheMu sync.RWMutex
+	styleCache   = map[styleCacheKey]*TermTextGridStyle{}
+)
+
+// invalidateStyleCache drops all interned styles. Called when the default theme
+// colours change, because styles built with a nil fg/bg derive their inverted
+// colour from the theme at build time.
+func invalidateStyleCache() {
+	styleCacheMu.Lock()
+	if len(styleCache) > 0 {
+		styleCache = make(map[styleCacheKey]*TermTextGridStyle)
+	}
+	styleCacheMu.Unlock()
+}
+
+// NewTermTextGridStyle returns a TextGridStyle with the specified foreground (fg)
+// and background (bg) colors and a bitmask controlling colour inversion. If fg or
+// bg is nil, the theme's default colour is used. Returned instances are interned
+// and shared by attribute combo (see styleCache); callers must not mutate them in
+// place — clone first (as HighlightRange does).
 func NewTermTextGridStyle(fg, bg color.Color, bitmask byte, blinkEnabled, bold, underlined bool) widget.TextGridStyle {
+	key := styleCacheKey{fg, bg, bitmask, blinkEnabled, bold, underlined}
+
+	styleCacheMu.RLock()
+	if s, ok := styleCache[key]; ok {
+		styleCacheMu.RUnlock()
+		return s
+	}
+	styleCacheMu.RUnlock()
+
+	s := buildTermTextGridStyle(fg, bg, bitmask, blinkEnabled, bold, underlined)
+
+	styleCacheMu.Lock()
+	if existing, ok := styleCache[key]; ok { // built concurrently — keep the first
+		styleCacheMu.Unlock()
+		return existing
+	}
+	if len(styleCache) < maxStyleCacheEntries {
+		styleCache[key] = s
+	}
+	styleCacheMu.Unlock()
+	return s
+}
+
+func buildTermTextGridStyle(fg, bg color.Color, bitmask byte, blinkEnabled, bold, underlined bool) *TermTextGridStyle {
 	// calculate the inverted colors
 	var invertedFg, invertedBg color.Color
 	if fg == nil {

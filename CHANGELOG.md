@@ -5,6 +5,10 @@ This project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased] - 2025-09-16
 
+## [0.1.44]
+### Fixed/Changed
+- Various performance related improvements to grid rendering
+
 ## [0.1.40]
 ### Fixed
 - Patch various race conditions that could cause sudden program exit

@@ -138,6 +138,11 @@ func (t *TermGrid) drawToImage(w, h int) image.Image {
 	bgu := getUniform(defaultBG)
 	if fgu != t.prevDefaultFGU || bgu != t.prevDefaultBGU || scale != t.prevScale {
 		t.cellSnaps = nil
+		if fgu != t.prevDefaultFGU || bgu != t.prevDefaultBGU {
+			// Interned styles built with a nil fg/bg baked in the old theme's
+			// inverted colour; drop them so they rebuild against the new theme.
+			invalidateStyleCache()
+		}
 		t.prevDefaultFGU = fgu
 		t.prevDefaultBGU = bgu
 		t.prevScale = scale

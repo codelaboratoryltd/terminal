@@ -454,10 +454,6 @@ func (t *Terminal) handleOutputChar(r rune) {
 		row.Cells = append(row.Cells, blankCell)
 	}
 
-	if t.blinking {
-		cellStyle = widget2.NewTermTextGridStyle(t.currentFG, t.currentBG, highlightBitMask, t.blinking, t.bold, t.underlined)
-	}
-
 	// Place the character at the current position (manually to avoid TextGrid internal assumptions)
 	if t.cursorCol < len(row.Cells) {
 		row.Cells[t.cursorCol] = widget.TextGridCell{Rune: r, Style: cellStyle}
