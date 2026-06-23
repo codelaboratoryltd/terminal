@@ -490,8 +490,8 @@ func (t *Terminal) refreshCursor() {
 		t.cursor.StrokeWidth = 1
 	}
 
-	// Ensure blinking is active/paused based on current state
-	t.ensureCursorBlinking()
+	// Ensure the blink clock is active/paused based on current state
+	t.ensureBlinkClock()
 
 	t.cursor.Refresh()
 }

@@ -17,8 +17,6 @@ import (
 	"fyne.io/fyne/v2"
 )
 
-const blinkingInterval = 500 * time.Millisecond
-
 // TermGrid is a monospaced grid of characters.
 // This is designed to be used by our terminal emulator.
 //
@@ -35,9 +33,19 @@ const blinkingInterval = 500 * time.Millisecond
 type TermGrid struct {
 	widget.TextGrid
 
+	// tickerCancel cancels the slow-blink heartbeat goroutine (low-graphics mode
+	// only). In normal mode the grid does not run its own blink ticker — the
+	// owning Terminal's unified blink clock drives the phase via SetBlinkPhase so
+	// blinking text and the cursor stay in lockstep.
 	tickerCancel context.CancelFunc
 	// mayContainBlink is true until a refresh finds no BlinkEnabled cells; then false skips O(n) scans.
 	mayContainBlink atomic.Bool
+	// blinkPhaseVisible is the current blink phase: true = cells visible (on),
+	// false = cells in their "off" (invisible) phase. Re-applied to BlinkEnabled
+	// cells on every Refresh so freshly drawn cells immediately match the current
+	// phase rather than briefly showing a stale phase inherited from a shared
+	// interned style. Driven by SetBlinkPhase (normal) or the slow heartbeat.
+	blinkPhaseVisible bool
 
 	// rowsMu guards the embedded TextGrid.Rows slice (and the Cells slices it
 	// holds) against concurrent access. The PTY reader goroutine mutates Rows via
@@ -308,6 +316,7 @@ func NewTermGrid() *TermGrid {
 	grid := &TermGrid{}
 	grid.ExtendBaseWidget(grid)
 	grid.mayContainBlink.Store(true)
+	grid.blinkPhaseVisible = true // resting state: text visible
 	return grid
 }
 
@@ -317,63 +326,97 @@ func (t *TermGrid) InvalidateBlinkCache() {
 }
 
 // Refresh will be called when this grid should update.
-// We update our blinking status and then redraw the raster.
+// We re-apply the current blink phase and redraw the raster.
 func (t *TermGrid) Refresh() {
 	// Safety check: don't refresh if Rows is nil (during cleanup)
 	if t.Rows == nil {
 		return
 	}
-	t.refreshBlink(false)
+
+	if IsSlowBlinkMode() {
+		// Low-graphics mode: the grid self-drives a slow heartbeat (the cursor
+		// does not blink here, so there is nothing to stay in sync with).
+		t.refreshSlowBlink()
+		return
+	}
+
+	// Normal mode: the Terminal's unified blink clock owns the cadence. Just
+	// re-apply the current phase (so freshly drawn BlinkEnabled cells match it)
+	// and repaint. If a slow-mode ticker was left running (mode just switched),
+	// stop it — the clock takes over.
+	if t.tickerCancel != nil {
+		t.tickerCancel()
+		t.tickerCancel = nil
+	}
+	t.applyBlinkPhase(t.blinkPhaseVisible)
+	if t.raster != nil {
+		t.raster.Refresh()
+	}
 }
 
-func (t *TermGrid) refreshBlink(blink bool) {
-	// Safety check: ensure Rows is not nil before accessing
-	if t.Rows == nil {
-		return
+// applyBlinkPhase sets every BlinkEnabled cell's render phase to `visible` and
+// reports whether any BlinkEnabled cells exist. Maintains the mayContainBlink
+// fast-path. It does not repaint — callers refresh the raster.
+func (t *TermGrid) applyBlinkPhase(visible bool) (hasBlink bool) {
+	if t.Rows == nil || !t.mayContainBlink.Load() {
+		return false
 	}
-
-	if !t.mayContainBlink.Load() {
-		if t.tickerCancel != nil {
-			t.tickerCancel()
-			t.tickerCancel = nil
-		}
-		if t.raster != nil {
-			t.raster.Refresh()
-		}
-		return
-	}
-
-	shouldBlink := false
 	for _, row := range t.Rows {
 		if row.Cells == nil {
 			continue
 		}
 		for _, r := range row.Cells {
 			if s, ok := r.Style.(*TermTextGridStyle); ok && s != nil && s.BlinkEnabled {
-				shouldBlink = true
-				s.blink(blink)
+				hasBlink = true
+				s.blink(!visible) // blinked == "off phase", so invert
 			}
 		}
 	}
-
-	if !shouldBlink {
+	if !hasBlink {
 		t.mayContainBlink.Store(false)
 	}
-
-	if t.raster != nil {
-		t.raster.Refresh()
-	}
-
-	switch {
-	case shouldBlink && t.tickerCancel == nil:
-		t.runBlink()
-	case !shouldBlink && t.tickerCancel != nil:
-		t.tickerCancel()
-		t.tickerCancel = nil
-	}
+	return hasBlink
 }
 
-// StopBlink stops any active blinking animation
+// SetBlinkPhase is called by the owning Terminal's unified blink clock (normal
+// mode) to drive the shared blink phase: visible == true shows BlinkEnabled
+// cells, false hides them. Applies the phase to all BlinkEnabled cells and
+// repaints. Returns whether any BlinkEnabled cells remain.
+func (t *TermGrid) SetBlinkPhase(visible bool) (hasBlink bool) {
+	t.blinkPhaseVisible = visible
+	hasBlink = t.applyBlinkPhase(visible)
+	// Only repaint when cells actually carry blink; otherwise a cursor-only blink
+	// clock would force a full grid raster refresh every tick (expensive on
+	// software OpenGL). The cursor repaints itself separately.
+	if hasBlink && t.raster != nil {
+		t.raster.Refresh()
+	}
+	return hasBlink
+}
+
+// HasBlinkCells reports whether the grid currently contains any BlinkEnabled
+// cells. Cheap when mayContainBlink is already false. The Terminal uses this to
+// decide whether its blink clock must run even when the cursor is solid.
+func (t *TermGrid) HasBlinkCells() bool {
+	if t.Rows == nil || !t.mayContainBlink.Load() {
+		return false
+	}
+	for _, row := range t.Rows {
+		if row.Cells == nil {
+			continue
+		}
+		for _, r := range row.Cells {
+			if s, ok := r.Style.(*TermTextGridStyle); ok && s != nil && s.BlinkEnabled {
+				return true
+			}
+		}
+	}
+	t.mayContainBlink.Store(false)
+	return false
+}
+
+// StopBlink stops any active slow-blink heartbeat. Normal-mode blinking is owned
+// by the Terminal's clock, so this only affects low-graphics mode.
 func (t *TermGrid) StopBlink() {
 	if t.tickerCancel != nil {
 		t.tickerCancel()
@@ -388,42 +431,21 @@ const slowBlinkVisible = 3 * time.Second
 // slowBlinkInvisible is the duration of the "off" pulse in slow-blink mode.
 const slowBlinkInvisible = 500 * time.Millisecond
 
-func (t *TermGrid) runBlink() {
-	if t.tickerCancel != nil {
+// refreshSlowBlink applies the current phase and (de)arms the low-graphics
+// heartbeat goroutine based on whether any BlinkEnabled cells are present. Only
+// used in slow-blink mode; normal-mode blinking is driven by the Terminal clock.
+func (t *TermGrid) refreshSlowBlink() {
+	hasBlink := t.applyBlinkPhase(t.blinkPhaseVisible)
+	if t.raster != nil {
+		t.raster.Refresh()
+	}
+	switch {
+	case hasBlink && t.tickerCancel == nil:
+		t.runBlinkSlow()
+	case !hasBlink && t.tickerCancel != nil:
 		t.tickerCancel()
 		t.tickerCancel = nil
 	}
-	var tickerContext context.Context
-	tickerContext, t.tickerCancel = context.WithCancel(context.Background())
-
-	if IsSlowBlinkMode() {
-		go t.runBlinkSlow(tickerContext)
-		return
-	}
-
-	ticker := time.NewTicker(blinkingInterval)
-	blinking := false
-	go func() {
-		defer func() {
-			ticker.Stop()
-			if r := recover(); r != nil {
-				// Log panic but don't crash the application
-				fmt.Printf("Panic in TermGrid blink goroutine: %v\n", r)
-			}
-		}()
-
-		for {
-			select {
-			case <-tickerContext.Done():
-				return
-			case <-ticker.C:
-				blinking = !blinking
-				fyne.Do(func() {
-					t.refreshBlink(blinking)
-				})
-			}
-		}
-	}()
 }
 
 // runBlinkSlow drives blinking text in low-graphics mode: cells are visible
@@ -431,31 +453,40 @@ func (t *TermGrid) runBlink() {
 // Combined with the underline marker injected by TermTextGridStyle.Style()
 // this preserves the "draw attention" semantic while reducing full-window
 // repaints from ~2 Hz to ~0.57 Hz.
-func (t *TermGrid) runBlinkSlow(ctx context.Context) {
-	defer func() {
-		if r := recover(); r != nil {
-			fmt.Printf("Panic in TermGrid slow blink goroutine: %v\n", r)
-		}
-	}()
+func (t *TermGrid) runBlinkSlow() {
+	if t.tickerCancel != nil {
+		t.tickerCancel()
+		t.tickerCancel = nil
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.tickerCancel = cancel
 
-	visible := true
-	timer := time.NewTimer(slowBlinkVisible)
-	defer timer.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-timer.C:
-			visible = !visible
-			blinking := !visible // refreshBlink treats true == "in the off phase"
-			fyne.Do(func() {
-				t.refreshBlink(blinking)
-			})
-			if visible {
-				timer.Reset(slowBlinkVisible)
-			} else {
-				timer.Reset(slowBlinkInvisible)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Printf("Panic in TermGrid slow blink goroutine: %v\n", r)
+			}
+		}()
+
+		visible := true
+		timer := time.NewTimer(slowBlinkVisible)
+		defer timer.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-timer.C:
+				visible = !visible
+				phase := visible
+				fyne.Do(func() {
+					t.SetBlinkPhase(phase)
+				})
+				if visible {
+					timer.Reset(slowBlinkVisible)
+				} else {
+					timer.Reset(slowBlinkInvisible)
+				}
 			}
 		}
-	}
+	}()
 }

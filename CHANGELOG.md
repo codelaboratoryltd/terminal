@@ -8,6 +8,10 @@ This project adheres to [Semantic Versioning](http://semver.org/).
 - SGR sequences whose first parameter is `0` (e.g. `\x1b[0;1m` reset+bold) no longer
   have the leading `0` stripped, which previously dropped the reset and leaked
   blink/underline/colour attributes into following text.
+- Unified the cursor and text blink onto a single blink clock so they pulse in
+  lockstep instead of drifting on two independent 500ms tickers. Also removes the
+  duplicate blink goroutine and fixes freshly drawn blinking text briefly showing
+  a stale phase inherited from a shared interned style.
 
 ## [0.1.44]
 ### Fixed/Changed

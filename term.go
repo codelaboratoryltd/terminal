@@ -205,10 +205,15 @@ type Terminal struct {
 	savedCursorRow int
 	savedCursorCol int
 
-	// Cursor blinking management
-	cursorBlinkCancel   context.CancelFunc
-	cursorBlinkOn       bool // internal toggle to track blink state
-	cursorBlinkDisabled bool // when true, ensureCursorBlinking never starts the ticker (low-graphics mode)
+	// Blink management. A single "blink clock" drives both the text-cell blink
+	// phase and the cursor so they pulse in lockstep (a real terminal shares one
+	// blink clock). It runs only while focused, in normal (non-slow) mode, when
+	// either the cursor should blink or the grid holds BlinkEnabled cells. In
+	// low-graphics/slow mode the grid self-drives its slow heartbeat and the
+	// cursor is held solid, so this clock stays idle.
+	blinkClockCancel    context.CancelFunc
+	blinkVisible        bool // shared phase: true = on (cursor shown, blink text shown)
+	cursorBlinkDisabled bool // when true, the cursor is held solid (low-graphics mode)
 
 	// Mouse reporting modes
 	mouseSGR bool // DECSET 1006
@@ -1358,16 +1363,16 @@ func (t *Terminal) SetCursorShape(shape string) {
 	}
 }
 
-// Focus management to start/stop cursor blinking.
+// Focus management to start/stop blinking.
 func (t *Terminal) FocusGained() {
 	t.focused = true
-	t.ensureCursorBlinking()
+	t.ensureBlinkClock()
 	// Only refresh if we're not in cleanup mode
 	if !t.cleaningUp {
 		t.Refresh()
-		// Refresh the TermGrid so its blink ticker re-arms if there are any
-		// BlinkEnabled cells (we paused it in FocusLost). The mayContainBlink
-		// short-circuit means this is cheap when no cells blink.
+		// Repaint the TermGrid so it re-applies the current blink phase; in slow
+		// mode this also re-arms its heartbeat. The mayContainBlink short-circuit
+		// keeps it cheap when no cells blink.
 		if t.content != nil {
 			t.content.Refresh()
 		}
@@ -1376,13 +1381,14 @@ func (t *Terminal) FocusGained() {
 
 func (t *Terminal) FocusLost() {
 	t.focused = false
-	t.stopCursorBlink()
+	t.stopBlinkClock()
 	if t.cursor != nil {
 		t.cursor.Hidden = true
 	}
-	// Pause the TermGrid blink ticker — when the window is unfocused, blinking
-	// cells aren't visible to the user anyway, but on software OpenGL each
-	// 500ms tick forces a full canvas redraw. FocusGained re-arms it.
+	// Pause the TermGrid slow-blink heartbeat — when the window is unfocused,
+	// blinking cells aren't visible to the user anyway, but on software OpenGL
+	// each tick forces a full canvas redraw. FocusGained re-arms it. (Normal-mode
+	// blinking is driven by the blink clock, already stopped above.)
 	if t.content != nil {
 		t.content.StopBlink()
 	}
@@ -1392,20 +1398,27 @@ func (t *Terminal) FocusLost() {
 	}
 }
 
-// ensureCursorBlinking toggles the blinking loop based on visibility/focus and shape.
-func (t *Terminal) ensureCursorBlinking() {
-	// Blink when focused and cursor is not permanently hidden, unless blinking
-	// has been disabled (e.g. low-graphics mode).
-	shouldBlink := t.focused && !t.cursorHidden && !t.cursorBlinkDisabled
+// cursorShouldBlink reports whether the cursor itself wants the blink clock
+// running: focused, not hidden, and blinking not disabled (low-graphics mode).
+func (t *Terminal) cursorShouldBlink() bool {
+	return t.focused && !t.cursorHidden && !t.cursorBlinkDisabled
+}
 
-	if !shouldBlink {
-		t.stopCursorBlink()
+// ensureBlinkClock starts or stops the single shared blink clock based on
+// current state. Idempotent and cheap; called from focus changes, cursor
+// refreshes and mode switches. The clock runs while focused and not in slow
+// mode when either the cursor blinks or the grid has BlinkEnabled cells, so
+// the cursor and blinking text always share one phase.
+func (t *Terminal) ensureBlinkClock() {
+	textBlinks := t.focused && !widget2.IsSlowBlinkMode() && t.content != nil && t.content.HasBlinkCells()
+	shouldRun := !widget2.IsSlowBlinkMode() && (t.cursorShouldBlink() || textBlinks)
+
+	if !shouldRun {
+		t.stopBlinkClock()
 		return
 	}
-
-	// Start if not running
-	if t.cursorBlinkCancel == nil {
-		t.startCursorBlink()
+	if t.blinkClockCancel == nil {
+		t.startBlinkClock()
 	}
 }
 
@@ -1414,7 +1427,7 @@ func (t *Terminal) ensureCursorBlinking() {
 // where the 500ms blink ticker costs a full canvas redraw on software OpenGL.
 func (t *Terminal) SetCursorBlinkEnabled(enabled bool) {
 	t.cursorBlinkDisabled = !enabled
-	t.ensureCursorBlinking()
+	t.ensureBlinkClock()
 	if t.cursor != nil {
 		// When disabled, force the cursor visible (subject to focus/cursorHidden).
 		t.cursor.Hidden = !t.focused || t.cursorHidden
@@ -1432,14 +1445,17 @@ func (t *Terminal) SetCursorBlinkEnabled(enabled bool) {
 // low-graphics setting wants.
 func (t *Terminal) SetSlowTextBlink(on bool) {
 	widget2.SetSlowBlinkMode(on)
+	// Switching modes changes who owns the blink cadence: in slow mode the grid
+	// self-drives its heartbeat and the unified clock must stand down; in normal
+	// mode the clock takes back over. Stop the grid's slow ticker and re-evaluate
+	// the clock so the right driver is running.
 	if t.content != nil {
-		// Force a rescan so Style()'s underline injection re-applies and the
-		// running ticker (if any) gets re-armed at the new cadence on its
-		// next refreshBlink call.
+		// Force a rescan so Style()'s underline injection re-applies.
 		t.content.InvalidateBlinkCache()
 		t.content.StopBlink()
 		t.content.Refresh()
 	}
+	t.ensureBlinkClock()
 }
 
 // SetForcedFullRefresh, when on, disables the dirty-region render optimisation and
@@ -1455,22 +1471,25 @@ func (t *Terminal) SetForcedFullRefresh(on bool) {
 	}
 }
 
-func (t *Terminal) startCursorBlink() {
-	if t.cursorBlinkCancel != nil {
+// blinkInterval is the single source of truth for the normal blink cadence,
+// shared by the cursor and text cells via the unified blink clock.
+const blinkInterval = 500 * time.Millisecond
+
+func (t *Terminal) startBlinkClock() {
+	if t.blinkClockCancel != nil {
 		return
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	t.cursorBlinkCancel = cancel
-	interval := 500 * time.Millisecond
-	t.cursorBlinkOn = true
+	t.blinkClockCancel = cancel
+	t.blinkVisible = true
 
 	go func() {
-		ticker := time.NewTicker(interval)
+		ticker := time.NewTicker(blinkInterval)
 		defer func() {
 			ticker.Stop()
 			if r := recover(); r != nil {
 				// Log panic but don't crash the application
-				fmt.Printf("Panic in cursor blink goroutine: %v\n", r)
+				fmt.Printf("Panic in blink clock goroutine: %v\n", r)
 			}
 		}()
 
@@ -1479,30 +1498,41 @@ func (t *Terminal) startCursorBlink() {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				// Toggle visibility
-				t.cursorBlinkOn = !t.cursorBlinkOn
-				if t.cursor != nil {
-					// Only toggle if still appropriate to blink
-					if t.focused && !t.cursorHidden {
-						t.cursor.Hidden = !t.cursorBlinkOn
-						fyne.Do(func() {
-							t.cursor.Refresh()
-						})
-					}
-				}
+				t.blinkVisible = !t.blinkVisible
+				visible := t.blinkVisible
+				fyne.Do(func() {
+					t.applyBlinkVisible(visible)
+				})
 			}
 		}
 	}()
 }
 
-func (t *Terminal) stopCursorBlink() {
-	if t.cursorBlinkCancel != nil {
-		t.cursorBlinkCancel()
-		t.cursorBlinkCancel = nil
+// applyBlinkVisible pushes one blink phase to both consumers so they stay in
+// lockstep: the cursor and every BlinkEnabled text cell. Runs on the Fyne
+// goroutine.
+func (t *Terminal) applyBlinkVisible(visible bool) {
+	if t.cursor != nil && t.cursorShouldBlink() {
+		t.cursor.Hidden = !visible
+		t.cursor.Refresh()
 	}
-	// Ensure cursor is shown when we stop blinking (if focused state would want it)
+	if t.content != nil && !widget2.IsSlowBlinkMode() {
+		t.content.SetBlinkPhase(visible)
+	}
+}
+
+func (t *Terminal) stopBlinkClock() {
+	if t.blinkClockCancel != nil {
+		t.blinkClockCancel()
+		t.blinkClockCancel = nil
+	}
+	// Leave both consumers in their resting (visible) state so nothing is stuck
+	// mid-blink: cursor shown if focus would want it, blink text shown.
 	if t.cursor != nil {
 		t.cursor.Hidden = !t.focused || t.cursorHidden
+	}
+	if t.content != nil && !widget2.IsSlowBlinkMode() {
+		t.content.SetBlinkPhase(true)
 	}
 }
 
@@ -1512,8 +1542,8 @@ func (t *Terminal) Cleanup() {
 	// Set cleanup flag to stop run loop processing
 	t.cleaningUp = true
 
-	// Stop cursor blinking first
-	t.stopCursorBlink()
+	// Stop the blink clock first
+	t.stopBlinkClock()
 
 	// Close all listeners and channels
 	t.listenerLock.Lock()
