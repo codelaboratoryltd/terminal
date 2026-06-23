@@ -302,27 +302,14 @@ func (t *Terminal) CellPixelSize() fyne.Size {
 	return t.guessCellSize()
 }
 
-// CursorRenderedPosition returns the pixel position and size of the cursor in
-// the terminal's local coordinate space. It prefers the live cursor rectangle
-// (so it matches exactly what is on screen, including blink state), but falls
-// back to the computed cell geometry when the cursor object has not been created
-// yet or is transiently zero-sized (e.g. invalidateCellCache resizes it to 0,0
-// to force recalculation, or it was created before its first layout). The
-// fallback keeps callers like the cursor-locator arrow working regardless of
-// render/blink timing. ok is false only when no geometry is available at all
-// (cell size unknown).
+// CursorRenderedPosition returns the exact pixel position and size of the
+// cursor rectangle as currently placed by the renderer. Returns false if the
+// cursor object has not been created yet.
 func (t *Terminal) CursorRenderedPosition() (pos fyne.Position, size fyne.Size, ok bool) {
-	if t.cursor != nil {
-		if sz := t.cursor.Size(); sz.Width > 0 && sz.Height > 0 {
-			return t.cursor.Position(), sz, true
-		}
-	}
-	// Fall back to computed cell geometry (same formula as render.moveCursor).
-	cell := t.CellPixelSize()
-	if cell.Width <= 0 || cell.Height <= 0 {
+	if t.cursor == nil {
 		return
 	}
-	return t.CursorPixelPosition(), cell, true
+	return t.cursor.Position(), t.cursor.Size(), true
 }
 
 // SetKeyDownCallback registers a function invoked after every KeyDown event
