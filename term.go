@@ -138,8 +138,8 @@ type Terminal struct {
 	cursorChangeCallback       func(x, y int)
 	keyDownCallback            func(*fyne.KeyEvent)
 	keyUpCallback              func(*fyne.KeyEvent)
-	firstOutputFired bool
-	onFirstOutput    func()
+	firstOutputFired           bool
+	onFirstOutput              func()
 
 	lastDoubleTapTime time.Time
 
@@ -193,8 +193,8 @@ type Terminal struct {
 	readWriterConfigurator ReadWriterConfigurator
 	readMerge              []byte // scratch: leftOver + pty read, avoids alloc per chunk
 	keyRemap               map[fyne.KeyName]fyne.KeyName
-	numpadArrowKeys    bool // when true, numpad 2/4/6/8 keys act as arrow keys (tablet/on-screen keyboard mode)
-	suppressNumpadRune bool // set in TypedKey when a numpad navigation key is handled; cleared in TypedRune
+	numpadArrowKeys        bool // when true, numpad 2/4/6/8 keys act as arrow keys (tablet/on-screen keyboard mode)
+	suppressNumpadRune     bool // set in TypedKey when a numpad navigation key is handled; cleared in TypedRune
 
 	// xterm modes/buffers
 	wrapAround  bool // DECSET 7
@@ -211,6 +211,14 @@ type Terminal struct {
 	// either the cursor should blink or the grid holds BlinkEnabled cells. In
 	// low-graphics/slow mode the grid self-drives its slow heartbeat and the
 	// cursor is held solid, so this clock stays idle.
+	//
+	// blinkMu guards the clock lifecycle (blinkClockCancel) and the shared phase
+	// (blinkVisible). These are touched from two goroutines: the Fyne main
+	// goroutine (focus changes) and the PTY reader goroutine (escape sequences →
+	// refreshCursor → ensureBlinkClock). Without it, two racing starts could each
+	// pass the "already running?" check and leak an orphan ticker goroutine that
+	// can never be cancelled — producing an erratic, multi-oscillator blink.
+	blinkMu             sync.Mutex
 	blinkClockCancel    context.CancelFunc
 	blinkVisible        bool // shared phase: true = on (cursor shown, blink text shown)
 	cursorBlinkDisabled bool // when true, the cursor is held solid (low-graphics mode)
@@ -294,14 +302,27 @@ func (t *Terminal) CellPixelSize() fyne.Size {
 	return t.guessCellSize()
 }
 
-// CursorRenderedPosition returns the exact pixel position and size of the
-// cursor rectangle as currently placed by the renderer. Returns false if the
-// cursor object has not been created yet.
+// CursorRenderedPosition returns the pixel position and size of the cursor in
+// the terminal's local coordinate space. It prefers the live cursor rectangle
+// (so it matches exactly what is on screen, including blink state), but falls
+// back to the computed cell geometry when the cursor object has not been created
+// yet or is transiently zero-sized (e.g. invalidateCellCache resizes it to 0,0
+// to force recalculation, or it was created before its first layout). The
+// fallback keeps callers like the cursor-locator arrow working regardless of
+// render/blink timing. ok is false only when no geometry is available at all
+// (cell size unknown).
 func (t *Terminal) CursorRenderedPosition() (pos fyne.Position, size fyne.Size, ok bool) {
-	if t.cursor == nil {
+	if t.cursor != nil {
+		if sz := t.cursor.Size(); sz.Width > 0 && sz.Height > 0 {
+			return t.cursor.Position(), sz, true
+		}
+	}
+	// Fall back to computed cell geometry (same formula as render.moveCursor).
+	cell := t.CellPixelSize()
+	if cell.Width <= 0 || cell.Height <= 0 {
 		return
 	}
-	return t.cursor.Position(), t.cursor.Size(), true
+	return t.CursorPixelPosition(), cell, true
 }
 
 // SetKeyDownCallback registers a function invoked after every KeyDown event
@@ -1417,9 +1438,10 @@ func (t *Terminal) ensureBlinkClock() {
 		t.stopBlinkClock()
 		return
 	}
-	if t.blinkClockCancel == nil {
-		t.startBlinkClock()
-	}
+	// startBlinkClock performs the "already running?" check under blinkMu, so it
+	// is safe to call unconditionally from either goroutine — checking
+	// blinkClockCancel here without the lock would reintroduce the start race.
+	t.startBlinkClock()
 }
 
 // SetCursorBlinkEnabled controls whether the cursor blinks. When disabled the
@@ -1476,12 +1498,19 @@ func (t *Terminal) SetForcedFullRefresh(on bool) {
 const blinkInterval = 500 * time.Millisecond
 
 func (t *Terminal) startBlinkClock() {
+	// Atomic check-and-set under blinkMu: two racing callers (focus change on the
+	// main goroutine, escape sequence on the PTY goroutine) must not both pass
+	// the guard and spawn duplicate ticker goroutines — the loser's cancel would
+	// be lost, orphaning a goroutine that toggles the cursor forever.
+	t.blinkMu.Lock()
 	if t.blinkClockCancel != nil {
+		t.blinkMu.Unlock()
 		return
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.blinkClockCancel = cancel
 	t.blinkVisible = true
+	t.blinkMu.Unlock()
 
 	go func() {
 		ticker := time.NewTicker(blinkInterval)
@@ -1498,8 +1527,10 @@ func (t *Terminal) startBlinkClock() {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
+				t.blinkMu.Lock()
 				t.blinkVisible = !t.blinkVisible
 				visible := t.blinkVisible
+				t.blinkMu.Unlock()
 				fyne.Do(func() {
 					t.applyBlinkVisible(visible)
 				})
@@ -1522,10 +1553,12 @@ func (t *Terminal) applyBlinkVisible(visible bool) {
 }
 
 func (t *Terminal) stopBlinkClock() {
+	t.blinkMu.Lock()
 	if t.blinkClockCancel != nil {
 		t.blinkClockCancel()
 		t.blinkClockCancel = nil
 	}
+	t.blinkMu.Unlock()
 	// Leave both consumers in their resting (visible) state so nothing is stuck
 	// mid-blink: cursor shown if focus would want it, blink text shown.
 	if t.cursor != nil {
