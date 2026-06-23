@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"fyne.io/fyne/v2"
+	widget2 "github.com/fyne-io/terminal/internal/widget"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -353,8 +354,48 @@ func TestDCS_ScreenPassthrough(t *testing.T) {
 	assert.Equal(t, "HelloWORLD", strings.TrimRight(term.content.Text(), "\n "))
 }
 
-func TestTrimLeftZeros(t *testing.T) {
-	assert.Equal(t, "1", trimLeftZeros(string([]byte{0, 0, '1'})))
+// TestSGRResetWithLeadingZeroParam guards against a regression where the CSI
+// body had its leading '0' stripped (see trimLeftNuls): "\x1b[0;1m" was reduced
+// to ";1m", so the SGR reset (0) was dropped and only bold (1) applied. Any
+// attribute set before it (here: blink) then leaked into the following text.
+// This matched a real-world form UI whose status line set blink with "\x1b[5m"
+// and relied on a later "\x1b[0;1m" to clear it before drawing field values.
+func TestSGRResetWithLeadingZeroParam(t *testing.T) {
+	term := New()
+	term.config.Columns = 40
+	term.config.Rows = 2
+	term.Refresh()
+
+	// Blink on, write status text, then reset+bold (0;1) and write field text.
+	term.handleOutput([]byte("\x1b[5mWAIT\x1b[0;1mFIELD"))
+
+	row := term.content.Rows[0]
+	style := func(col int) *widget2.TermTextGridStyle {
+		s, _ := row.Cells[col].Style.(*widget2.TermTextGridStyle)
+		return s
+	}
+
+	// "WAIT" (cols 0-3) should be blinking.
+	for c := 0; c < 4; c++ {
+		assert.True(t, style(c).BlinkEnabled, "WAIT col %d should blink", c)
+	}
+	// "FIELD" (cols 4-8) must NOT be blinking after the 0;1 reset.
+	for c := 4; c < 9; c++ {
+		assert.False(t, style(c).BlinkEnabled, "FIELD col %d must not blink (reset leaked)", c)
+		assert.True(t, style(c).Bold(), "FIELD col %d should be bold", c)
+	}
+}
+
+func TestTrimLeftNuls(t *testing.T) {
+	// Leading NUL bytes are stripped.
+	assert.Equal(t, "1", trimLeftNuls(string([]byte{0, 0, '1'})))
+	// Leading '0' digits must be preserved: a leading '0' parameter is meaningful
+	// (e.g. SGR "0;1m" = reset + bold). Stripping it discarded the reset and let
+	// blink/underline/colour leak into following text.
+	assert.Equal(t, "0;1m", trimLeftNuls("0;1m"))
+	assert.Equal(t, "0m", trimLeftNuls("0m"))
+	assert.Equal(t, "00m", trimLeftNuls("00m"))
+	assert.Equal(t, "0;7m", trimLeftNuls(string([]byte{0, '0', ';', '7', 'm'})))
 }
 
 func TestHandleOutput_NewLineMode(t *testing.T) {

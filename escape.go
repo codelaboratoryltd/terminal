@@ -52,7 +52,7 @@ var escapes = map[rune]func(*Terminal, string){
 }
 
 func (t *Terminal) handleEscape(code string) {
-	code = trimLeftZeros(code)
+	code = trimLeftNuls(code)
 	if code == "" {
 		return
 	}
@@ -841,14 +841,24 @@ func escapeSoftResetBangAware(t *Terminal, msg string) {
 	// otherwise treat as regular 'p' (ignored here)
 }
 
-func trimLeftZeros(s string) string {
+// trimLeftNuls strips leading NUL (0x00) bytes from a CSI/escape body. Stray
+// NULs sometimes precede a sequence (e.g. padding from slow serial lines) and
+// would otherwise make the final byte unrecognised.
+//
+// It must NOT strip leading '0' digits: a leading '0' is a meaningful parameter.
+// For example "0;1m" is SGR reset (0) followed by bold (1); dropping the '0'
+// turns it into ";1m", which is parsed as an empty (ignored) first parameter
+// plus bold — silently discarding the reset and leaking blink/underline/colour
+// attributes into the following text. Zero-padded single parameters like "007H"
+// are already handled correctly by strconv.Atoi downstream.
+func trimLeftNuls(s string) string {
 	if s == "" {
 		return s
 	}
 	i := 0
 	for i < len(s) {
 		r, size := utf8.DecodeRuneInString(s[i:])
-		if r != 0 && r != '0' {
+		if r != 0 {
 			break
 		}
 		i += size

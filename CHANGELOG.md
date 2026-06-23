@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 This project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased] - 2025-09-16
+### Fixed
+- SGR sequences whose first parameter is `0` (e.g. `\x1b[0;1m` reset+bold) no longer
+  have the leading `0` stripped, which previously dropped the reset and leaked
+  blink/underline/colour attributes into following text.
 
 ## [0.1.44]
 ### Fixed/Changed
