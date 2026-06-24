@@ -35,6 +35,7 @@ var escapes = map[rune]func(*Terminal, string){
 	'K': escapeEraseInLine,
 	'P': escapeDeleteChars,
 	'X': escapeEraseChars, // ECH
+	'b': escapeRepeatChar, // REP: repeat preceding graphic char
 	'r': escapeSetScrollArea,
 	's': escapeSaveCursor,
 	'S': escapeScrollUp,
@@ -235,6 +236,10 @@ func (t *Terminal) moveCursor(row, col int) {
 	// Any explicit cursor movement clears a pending wrap, per xterm deferred-wrap rules
 	t.wrapPending = false
 
+	// A cursor move ends the run of graphic characters, so REP (CSI b) after an
+	// intervening move is a no-op rather than repeating a stale glyph.
+	t.lastPrintedRune = 0
+
 	t.cursorCol = col
 	t.cursorRow = row
 
@@ -362,6 +367,24 @@ func escapeEraseChars(t *Terminal, msg string) {
 		cells[i] = blank
 	}
 	t.content.SetRow(t.cursorRow, widget.TextGridRow{Cells: cells[:width]})
+}
+
+// CSI Ps b: REP - repeat the last graphic character Ps times (default 1).
+// Per ECMA-48 this applies to the most recently emitted graphic character; if the
+// previous operation was a control/cursor movement (which resets lastPrintedRune to 0)
+// REP does nothing.
+func escapeRepeatChar(t *Terminal, msg string) {
+	n, _ := strconv.Atoi(msg)
+	if n <= 0 {
+		n = 1
+	}
+	if t.lastPrintedRune == 0 {
+		return
+	}
+	r := t.lastPrintedRune
+	for i := 0; i < n; i++ {
+		t.handleOutputChar(r)
+	}
 }
 
 func escapeEraseInScreen(t *Terminal, msg string) {

@@ -147,6 +147,15 @@ type Terminal struct {
 	customTheme fyne.Theme
 	// Custom background color override - when set, this is used instead of theme background
 	backgroundColorOverride color.Color
+	// foregroundColorOverride is set by OSC 10 (set default foreground). When non-nil it
+	// replaces the theme foreground for PTY cells that use the default colour.
+	foregroundColorOverride color.Color
+	// cursorColorOverride is set by OSC 12 (set cursor colour). When non-nil it replaces
+	// the theme primary colour used to paint the cursor.
+	cursorColorOverride color.Color
+	// lastPrintedRune is the most recent graphic character written to the grid. CSI b (REP)
+	// repeats it; it is reset to 0 by control operations so REP after one is a no-op.
+	lastPrintedRune rune
 	// OSC handlers for Operating System Commands
 	oscHandlers map[int]func(string)
 	// APC handlers are now per-instance to avoid cross-terminal pollution
@@ -1224,6 +1233,7 @@ type ptyTheme struct {
 	base            fyne.Theme
 	textSize        float32
 	backgroundColor color.Color
+	foregroundColor color.Color // set by OSC 10; nil means defer to base theme
 }
 
 func (f *fontOverrideTheme) Color(n fyne.ThemeColorName, v fyne.ThemeVariant) color.Color {
@@ -1249,6 +1259,9 @@ func (f *fontOverrideTheme) Size(n fyne.ThemeSizeName) float32 {
 func (p *ptyTheme) Color(n fyne.ThemeColorName, v fyne.ThemeVariant) color.Color {
 	if n == theme.ColorNameBackground {
 		return p.backgroundColor
+	}
+	if n == theme.ColorNameForeground && p.foregroundColor != nil {
+		return p.foregroundColor
 	}
 	return p.base.Color(n, v)
 }

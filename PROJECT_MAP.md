@@ -23,7 +23,7 @@ The terminal emulator library. All files sit in the repo root.
 | `input_windows.go` | 45 | Windows-specific key handling differences. |
 | `mouse.go` | 76 | Mouse events → PTY escape sequences (button, scroll, SGR mode). Touch here for mouse reporting bugs. |
 | `select.go` | 121 | Text selection (click-drag, double-click word, triple-click line). Stores selection range, exports selected text. |
-| `osc.go` | 146 | OSC command handlers: title changes (`OSC 0/1/2`), clipboard set/get (`OSC 52`), hyperlinks (`OSC 8`). |
+| `osc.go` | 146 | OSC command handlers: title (`OSC 0/2`), working dir (`OSC 7`), fg/bg/cursor colour set+query (`OSC 10/11/12`), shell-integration marks (`OSC 133`). `OSC 8`/`OSC 52` only work if a handler is registered via `RegisterOSCHandler` — no built-in default. |
 | `apc.go` | 72 | APC and DCS command handlers (less common — Kitty graphics protocol stubs live here). |
 | `position.go` | 52 | `position{row, col}` type, `cellForPos()` pixel→cell conversion, bounds helpers. |
 | `term_unix.go` | 50 | Unix PTY open (`creack/pty`), SIGWINCH signal forwarding on resize. |

@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 This project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased] - 2025-09-16
+### Added
+- `CSI Ps b` (REP): repeat the preceding graphic character `Ps` times. Previously
+  the repeats were silently dropped, leaving gaps where terminfo's `rep` capability
+  (and box-drawing/fill output) expected characters.
+- `OSC 10/11/12`: set and query the default foreground, background and cursor colours.
+  Set forms accept X11 colour specs (`#rgb`, `#rrggbb`, `#rrrrggggbbbb`, `rgb:r/g/b`);
+  the `?`-query form replies with `rgb:RRRR/GGGG/BBBB`, letting apps (e.g. vim/neovim)
+  detect the background and pick an appropriate colour scheme.
 
 ## [0.1.45]
 ### Fixed

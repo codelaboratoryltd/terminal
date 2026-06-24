@@ -457,6 +457,9 @@ func (t *Terminal) handleOutputChar(r rune) {
 	// Place the character at the current position (manually to avoid TextGrid internal assumptions)
 	if t.cursorCol < len(row.Cells) {
 		row.Cells[t.cursorCol] = widget.TextGridCell{Rune: r, Style: cellStyle}
+		// Remember it for REP (CSI b). Set inside the success branch so a bounds
+		// failure doesn't leave a stale rune behind.
+		t.lastPrintedRune = r
 	} else {
 		if t.debug {
 			println(fmt.Sprintf("WARNING: handleOutputRune final bounds check failed - cursorRow:%d cursorCol:%d rowsLen:%d cellsLen:%d",

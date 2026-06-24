@@ -409,6 +409,9 @@ func (t *Terminal) refreshCursor() {
 	// Base color selection (bell overrides)
 	if t.bell {
 		t.cursor.FillColor = theme.Color(theme.ColorNameError)
+	} else if t.cursorColorOverride != nil {
+		// OSC 12 set an explicit cursor colour; it wins over theme defaults.
+		t.cursor.FillColor = t.cursorColorOverride
 	} else {
 		// Use custom theme cursor color if available, otherwise use primary
 		if t.customTheme != nil {
