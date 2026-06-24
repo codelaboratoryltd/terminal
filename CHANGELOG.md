@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 This project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased] - 2025-09-16
+
+## [0.1.46]
 ### Added
 - `CSI Ps b` (REP): repeat the preceding graphic character `Ps` times. Previously
   the repeats were silently dropped, leaving gaps where terminfo's `rep` capability
