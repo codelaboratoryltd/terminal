@@ -57,13 +57,15 @@ func TestTerminal_TypedKey(t *testing.T) {
 		"Shift+PageUp":   {fyne.KeyPageUp, false, true, []byte{asciiEscape, '[', '5', ';', '2', '~'}},
 		"Shift+PageDown": {fyne.KeyPageDown, false, true, []byte{asciiEscape, '[', '6', ';', '2', '~'}},
 		"Shift+Home":     {fyne.KeyHome, false, true, []byte{asciiEscape, '[', '1', ';', '2', 'H'}},
-		"Shift+Insert":   {fyne.KeyInsert, false, true, []byte{asciiEscape, '[', '2', ';', '2', '~'}},
-		"Shift+Delete":   {fyne.KeyDelete, false, true, []byte{asciiEscape, '[', '3', ';', '2', '~'}},
-		"Shift+End":      {fyne.KeyEnd, false, true, []byte{asciiEscape, '[', '1', ';', '2', 'F'}},
-		"Shift+Up":       {fyne.KeyUp, false, true, []byte{asciiEscape, '[', 'A', ';', '2'}},
-		"Shift+Down":     {fyne.KeyDown, false, true, []byte{asciiEscape, '[', 'B', ';', '2'}},
-		"Shift+Left":     {fyne.KeyLeft, false, true, []byte{asciiEscape, '[', 'D', ';', '2'}},
-		"Shift+Right":    {fyne.KeyRight, false, true, []byte{asciiEscape, '[', 'C', ';', '2'}},
+		// Shift+Insert is intentionally absent: it is bound to paste (see
+		// keyTypedWithShift) rather than emitting an escape sequence. Its
+		// behavior is covered by TestTerminal_ShiftInsertPastes.
+		"Shift+Delete": {fyne.KeyDelete, false, true, []byte{asciiEscape, '[', '3', ';', '2', '~'}},
+		"Shift+End":    {fyne.KeyEnd, false, true, []byte{asciiEscape, '[', '1', ';', '2', 'F'}},
+		"Shift+Up":     {fyne.KeyUp, false, true, []byte{asciiEscape, '[', 'A', ';', '2'}},
+		"Shift+Down":   {fyne.KeyDown, false, true, []byte{asciiEscape, '[', 'B', ';', '2'}},
+		"Shift+Left":   {fyne.KeyLeft, false, true, []byte{asciiEscape, '[', 'D', ';', '2'}},
+		"Shift+Right":  {fyne.KeyRight, false, true, []byte{asciiEscape, '[', 'C', ';', '2'}},
 
 		"PageUp":    {fyne.KeyPageUp, false, false, []byte{asciiEscape, '[', '5', '~'}},
 		"PageDown":  {fyne.KeyPageDown, false, false, []byte{asciiEscape, '[', '6', '~'}},
@@ -96,6 +98,24 @@ func TestTerminal_TypedKey(t *testing.T) {
 				t.Errorf("TypedKey() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestTerminal_ShiftInsertPastes verifies that Shift+Insert pastes the
+// clipboard contents into the terminal rather than emitting an escape
+// sequence. See keyTypedWithShift for the binding.
+func TestTerminal_ShiftInsertPastes(t *testing.T) {
+	inBuffer := bytes.NewBuffer([]byte{})
+	term := &Terminal{in: NopCloser(inBuffer)}
+	term.keyboardState.shiftPressed = true
+
+	fyne.CurrentApp().Clipboard().SetContent("hello")
+	term.TypedKey(&fyne.KeyEvent{Name: fyne.KeyInsert})
+
+	got := inBuffer.Bytes()
+	want := []byte("hello")
+	if !bytes.Equal(got, want) {
+		t.Errorf("Shift+Insert paste = %v, want %v", got, want)
 	}
 }
 
