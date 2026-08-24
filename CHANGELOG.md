@@ -5,6 +5,10 @@ This project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased] - 2025-09-16
 
+## [0.1.47]
+### Added
+- Add "SetOnTapped" to terminal
+
 ## [0.1.46]
 ### Added
 - `CSI Ps b` (REP): repeat the preceding graphic character `Ps` times. Previously

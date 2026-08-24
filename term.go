@@ -169,6 +169,10 @@ type Terminal struct {
 	relayout                 func() // set by CreateRenderer; forces Layout at the current widget size
 
 	onMouseDown, onMouseUp func(int, fyne.KeyModifier, fyne.Position)
+	// onTapped, when set, is called after a tap has been handled (focus
+	// acquired). Used by hosts that need to react to touch input, e.g. to raise
+	// a platform on-screen keyboard.
+	onTapped func(*fyne.PointEvent)
 	g0Charset              charSet
 	g1Charset              charSet
 	useG1CharSet           bool
@@ -339,6 +343,12 @@ func (t *Terminal) SetKeyUpCallback(f func(*fyne.KeyEvent)) {
 // receives its first non-empty output. Safe to call before RunWithConnection.
 func (t *Terminal) SetOnFirstOutput(f func()) {
 	t.onFirstOutput = f
+}
+
+// SetOnTapped registers a callback invoked when the terminal is tapped, after
+// the tap has been handled internally. Pass nil to clear it.
+func (t *Terminal) SetOnTapped(f func(*fyne.PointEvent)) {
+	t.onTapped = f
 }
 
 // AcceptsTab indicates that this widget will use the Tab key (avoids loss of focus).
@@ -634,6 +644,9 @@ func (t *Terminal) Tapped(ev *fyne.PointEvent) {
 		}
 	}
 
+	if t.onTapped != nil {
+		t.onTapped(ev)
+	}
 }
 
 // Text returns the contents of the buffer as a single string joined with `\n` (no style information).
